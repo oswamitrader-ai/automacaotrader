@@ -696,8 +696,13 @@ const Bot = (() => {
       
       const cleanPair = pair.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
       const cleanTitle = (targetBrokerTab.title || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-      if (!cleanTitle.includes(cleanPair) && pair !== 'EUR/USD') {
-        logToConsole(`[Aviso] A ordem é para ${pair}, mas a aba atual pode estar em outro par. Abra uma nova aba para este par!`, 'warning');
+      
+      const commonPairs = ['EURUSD', 'GBPUSD', 'USDJPY', 'EURJPY', 'GBPJPY', 'USDCHF', 'EURGBP', 'EURCHF', 'AUDUSD', 'USDCAD', 'NZDUSD', 'AUDCAD', 'AUDCHF', 'AUDJPY', 'GBPCAD', 'GBPCHF', 'GBPAUD', 'NZDJPY', 'CADJPY', 'EURCAD', 'EURAUD', 'CHFJPY', 'CADCHF'];
+      const anotherPairInTitle = commonPairs.find(p => p !== cleanPair && cleanTitle.includes(p));
+      
+      if (anotherPairInTitle) {
+        const displayPair = anotherPairInTitle.substring(0,3) + '/' + anotherPairInTitle.substring(3);
+        logToConsole(`[Aviso] A ordem é para ${pair}, mas a aba atual está no par ${displayPair}. Abra o par correto na corretora!`, 'warning');
       }
     } else if (brokerTabs.length > 1) {
       // Múltiplas abas abertas! Roteamento inteligente pelo título da aba
@@ -727,7 +732,8 @@ const Bot = (() => {
         amount: amount,
         payout: settings.minPayout,
         pair: pair,
-        timeframe: timeframe
+        timeframe: timeframe,
+        accountType: settings.accountType
       }, (response) => {
         if (response && response.status === "success") {
           logToConsole(`Ordem recebida pela corretora. Aguardando resultado da operação...`, 'success');
@@ -847,30 +853,32 @@ const Bot = (() => {
         } else {
           state.currentSorosStage = 0;
           state.nextAmount = state.baseAmount;
-          if (state.currentCycleIndex < state.cycles.length) {
-            state.nextAmount = state.cycles[state.currentCycleIndex][0];
-            logToConsole(`[Ciclos] LOSS detectado no final do ciclo. Avançando para Ciclo ${state.currentCycleIndex + 1} Passo 1. Entrada: ${cur} ${state.nextAmount.toFixed(2)}`, 'warning');
-          } else {
-            logToConsole(`[Ciclos] FIM DOS CICLOS! Limite de ciclos estourado. Resetando para mão base.`, 'error');
-            state.currentCycleIndex = 0;
-            state.currentStepIndex = 0;
-            state.inCyclesRecovery = false;
-            state.nextAmount = state.baseAmount;
-          }
+          logToConsole(`[Soros] Ciclo de Soros finalizado com sucesso! Retornando para mão base: ${cur} ${state.nextAmount.toFixed(2)}`, 'success');
         }
-      } else if (opData.result === 'DRAW') {
-        logToConsole(`[Ciclos] Empate (DRAW) detectado. Resetando para o início do ciclo atual: ${cur} ${state.baseAmount.toFixed(2)}`, 'info');
-        state.currentCycleIndex = 0;
-        state.currentStepIndex = 0;
-        state.inCyclesRecovery = false;
-        if (state.cycles.length > 0) {
-          state.nextAmount = state.cycles[0][0];
+      } else {
+        state.nextAmount = state.baseAmount;
+      }
+    } else if (opData.result === 'LOSS') {
+      state.consecutiveLosses++;
+      
+      if (settings.useMartingale && state.currentGale < settings.martingales) {
+        state.currentGale++;
+        state.nextAmount = Number((opData.amount * settings.galeFactor).toFixed(2));
+        logToConsole(`[Martingale] LOSS! Aplicando Gale nível ${state.currentGale}. Próxima entrada: ${cur} ${state.nextAmount.toFixed(2)}`, 'warning');
+      } else {
+        state.currentGale = 0;
+        state.currentSorosStage = 0;
+        state.nextAmount = state.baseAmount;
+        if (settings.useMartingale && settings.martingales > 0) {
+          logToConsole(`[Martingale] LOSS! Limite de Gale atingido. Resetando para mão base: ${cur} ${state.nextAmount.toFixed(2)}`, 'error');
         } else {
-          state.nextAmount = state.baseAmount;
+          logToConsole(`[Gestão] LOSS! Mão de recuperação não ativa. Retornando para mão base: ${cur} ${state.nextAmount.toFixed(2)}`, 'info');
         }
       }
+    } else if (opData.result === 'DRAW' || opData.result === 'DRAWN') {
+      logToConsole(`[Gestão] Empate detectado. Repetindo a mesma entrada de: ${cur} ${opData.amount.toFixed(2)}`, 'info');
+      state.nextAmount = opData.amount;
     } else {
-      // Mão Fixa / Padrão
       state.nextAmount = state.baseAmount;
     }
 
@@ -1314,8 +1322,15 @@ const Bot = (() => {
     const lastSyncStr = localStorage.getItem('bo_economic_calendar_last_sync');
     const lastSync = lastSyncStr ? parseInt(lastSyncStr, 10) : 0;
     
-    // Se não for forçado, e o cache for válido (menos de 2 horas), usar o cache local
-    if (!force && lastSync && (nowTimestamp - lastSync < SYNC_COOLDOWN_MS)) {
+    const lastSyncDate = new Date(lastSync);
+    const today = new Date();
+    const isSameDay = lastSync && 
+                      lastSyncDate.getDate() === today.getDate() &&
+                      lastSyncDate.getMonth() === today.getMonth() &&
+                      lastSyncDate.getFullYear() === today.getFullYear();
+    
+    // Se não for forçado, e o cache for válido (menos de 2 horas) E do mesmo dia, usar o cache local
+    if (!force && lastSync && isSameDay && (nowTimestamp - lastSync < SYNC_COOLDOWN_MS)) {
       const saved = localStorage.getItem('bo_economic_calendar');
       if (saved) {
         const parsedEvents = JSON.parse(saved);
@@ -1326,41 +1341,70 @@ const Bot = (() => {
     }
 
     try {
-      const response = await fetch('https://nfs.faireconomy.media/ff_calendar_thisweek.json');
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status} - ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      
-      if (Array.isArray(data) && data.length > 0) {
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date();
-        endOfDay.setHours(23, 59, 59, 999);
-        
-        const todayEvents = data.filter(e => {
-          const eDate = new Date(e.date);
-          return eDate >= startOfDay && eDate <= endOfDay;
-        });
+      const url = 'https://sslecal2.investing.com/?promo_link=&columns=currency,importance,event&importance=1,2,3&features=datepicker,timezone&countries=25,32,6,37,7,5,22,12,4,35,36,110,43,11,26,10,39,120,41,42,24,14,118,53,38,111,113,45,51,34,52,47,19,48,122,125,56,8,55,100,103,107,13,57,109,102,112,123,46,124,147,15,104,119,105,108,121,50,44&calType=day&timeZone=12&lang=12';
+      const response = await fetch(url).then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.text();
+      });
 
+      // Parse do HTML retornado pela Investing.com
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(response, 'text/html');
+      const rows = doc.querySelectorAll('tr[id^="eventRowId_"]');
+      const todayEvents = [];
+
+      rows.forEach(row => {
+        const timeEl = row.querySelector('.time');
+        const currencyEl = row.querySelector('.flagCur');
+        const sentimentEl = row.querySelector('.sentiment');
+        const eventEl = row.querySelector('.event');
+
+        if (timeEl && currencyEl && sentimentEl && eventEl) {
+          const timeStr = timeEl.textContent.trim();
+          const country = currencyEl.textContent.trim();
+          const title = eventEl.textContent.trim();
+
+          // Contar relevância (número de grayFullBullishIcon no sentimentEl)
+          const fullStars = sentimentEl.querySelectorAll('.grayFullBullishIcon').length;
+          let impact = 'Low';
+          if (fullStars === 3) impact = 'High';
+          else if (fullStars === 2) impact = 'Medium';
+
+          const parts = timeStr.split(':');
+          if (parts.length === 2) {
+            const eventDate = new Date();
+            eventDate.setHours(parseInt(parts[0], 10), parseInt(parts[1], 10), 0, 0);
+            
+            todayEvents.push({
+              date: eventDate.toISOString(),
+              country: country,
+              title: title,
+              impact: impact
+            });
+          }
+        }
+      });
+
+      if (todayEvents.length > 0) {
         localStorage.setItem('bo_economic_calendar', JSON.stringify(todayEvents));
         localStorage.setItem('bo_economic_calendar_last_sync', nowTimestamp.toString());
         renderNewsTable(todayEvents);
-        logToConsole(`📅 Calendário de notícias sincronizado: ${todayEvents.length} eventos para hoje.`, 'success');
+        logToConsole(`📅 Calendário de notícias Investing.com sincronizado: ${todayEvents.length} eventos para hoje.`, 'success');
+      } else {
+        throw new Error("Nenhum evento econômico pôde ser parseado no widget.");
       }
     } catch (err) {
-      console.warn("[BinaryOps] Servidor de notícias indisponível/rate-limited:", err.message);
+      console.warn("[BinaryOps] Servidor de notícias Investing.com indisponível/erro:", err.message);
       const saved = localStorage.getItem('bo_economic_calendar');
       if (saved) {
         renderNewsTable(JSON.parse(saved));
-        logToConsole(`⚠️ Servidor de notícias ocupado (${err.message}). Usando calendário salvo em cache.`, 'warning');
+        logToConsole(`⚠️ Falha na Investing.com (${err.message}). Usando calendário salvo em cache.`, 'warning');
       } else {
         const container = document.getElementById('botNewsTableContainer');
         if (container) {
-          container.innerHTML = `<span style="color:var(--text-red)">Erro ao conectar com servidor de notícias.</span>`;
+          container.innerHTML = `<span style="color:var(--neon-red)">Erro ao conectar com a Investing.com. Verifique a extensão.</span>`;
         }
-        logToConsole(`❌ Falha ao obter calendário e sem cache disponível: ${err.message}`, 'error');
+        logToConsole(`❌ Falha ao obter calendário da Investing.com: ${err.message}`, 'error');
       }
     }
   }
@@ -1368,6 +1412,12 @@ const Bot = (() => {
   function renderNewsTable(events) {
     const container = document.getElementById('botNewsTableContainer');
     if (!container) return;
+
+    const todayFormatted = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    const labelEl = container.previousElementSibling?.querySelector('label');
+    if (labelEl) {
+      labelEl.textContent = `Eventos do Dia (${todayFormatted})`;
+    }
 
     const data = events || JSON.parse(localStorage.getItem('bo_economic_calendar') || '[]');
     

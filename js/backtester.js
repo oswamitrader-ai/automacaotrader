@@ -17,40 +17,87 @@ const Backtester = (() => {
       }
     });
 
-    document.getElementById('bkMgmtType')?.addEventListener('change', (e) => {
-      const container = document.getElementById('bkMgmtSettingsContainer');
-      if (container) {
-        container.style.display = e.target.value === 'martingale' ? 'flex' : 'none';
-      }
+    document.getElementById('btnBacktestBack')?.addEventListener('click', () => {
+      UI.navigateTo('cataloger');
     });
+
+    ['bkUseMartingale', 'bkUseSoros', 'bkUseCycles'].forEach(id => {
+      document.getElementById(id)?.addEventListener('change', () => {
+        updateMgmtFields();
+      });
+    });
+  }
+
+  function updateMgmtFields() {
+    const useMartingale = document.getElementById('bkUseMartingale')?.checked;
+    const useSoros = document.getElementById('bkUseSoros')?.checked;
+    const useCycles = document.getElementById('bkUseCycles')?.checked;
+    
+    const galeSettings = document.getElementById('bkMgmtMartingaleSettings');
+    const sorosSettings = document.getElementById('bkMgmtSorosSettings');
+    const cyclesSettings = document.getElementById('bkMgmtCyclesSettings');
+
+    if (galeSettings) {
+      galeSettings.style.display = useMartingale ? 'flex' : 'none';
+    }
+    if (sorosSettings) {
+      sorosSettings.style.display = useSoros ? 'flex' : 'none';
+    }
+    if (cyclesSettings) {
+      cyclesSettings.style.display = useCycles ? 'flex' : 'none';
+    }
   }
 
   // Acionado pelo catalogador ao clicar em "Testar"
   function open(patternData) {
     activeData = patternData;
     
-    // Atualizar título do modal
+    // Atualizar título
     const titleEl = document.getElementById('backtestModalTitle');
     if (titleEl) {
       titleEl.innerHTML = `📊 Backtesting: ${patternData.pattern} [${patternData.pair}]`;
     }
 
-    // Configurações padrão
-    document.getElementById('bkAmount').value = 10;
-    document.getElementById('bkPayout').value = 80;
+    // Configurações padrão carregadas a partir do robô se existirem, ou do padrão do robô
+    let botSettings = {};
+    try {
+      const saved = localStorage.getItem('bo_bot_settings');
+      if (saved) botSettings = JSON.parse(saved);
+    } catch (e) {}
+
+    document.getElementById('bkAmount').value = botSettings.entryAmount || 10;
+    document.getElementById('bkPayout').value = activeData.payout || botSettings.minPayout || 80;
     
-    // Sincronizar visibilidade das configurações adicionais de Martingale
-    const mgmtSelect = document.getElementById('bkMgmtType');
-    const container = document.getElementById('bkMgmtSettingsContainer');
-    if (mgmtSelect && container) {
-      container.style.display = mgmtSelect.value === 'martingale' ? 'flex' : 'none';
-    }
+    // Configurações de Gerenciamento do Backtest vindas do Robô
+    const useMartingaleEl = document.getElementById('bkUseMartingale');
+    if (useMartingaleEl) useMartingaleEl.checked = botSettings.useMartingale !== false;
     
-    // Exibe o modal
-    UI.openModal('backtestModal');
+    const useSorosEl = document.getElementById('bkUseSoros');
+    if (useSorosEl) useSorosEl.checked = botSettings.useSoros === true;
+    
+    const useCyclesEl = document.getElementById('bkUseCycles');
+    if (useCyclesEl) useCyclesEl.checked = botSettings.useCycles === true;
+    
+    const martingalesEl = document.getElementById('bkMartingales');
+    if (martingalesEl) martingalesEl.value = botSettings.martingales !== undefined ? botSettings.martingales : 1;
+    
+    const galeFactorEl = document.getElementById('bkGaleFactor');
+    if (galeFactorEl) galeFactorEl.value = botSettings.galeFactor || 2.0;
+    
+    const sorosLevelEl = document.getElementById('bkSorosLevel');
+    if (sorosLevelEl) sorosLevelEl.value = botSettings.sorosLevel || 1;
+    
+    const cyclesConfigEl = document.getElementById('bkCyclesConfig');
+    if (cyclesConfigEl) cyclesConfigEl.value = botSettings.cyclesConfig || "C1: 10, 20\nC2: 15, 30\nC3: 25, 55";
+    
+    // Sincronizar visibilidade
+    updateMgmtFields();
+    
+    // Navegar para a página de backtest
+    UI.navigateTo('backtest');
     
     // Roda a simulação inicial
-    setTimeout(runSimulation, 300); // Pequeno timeout para o modal renderizar o Canvas antes
+    setTimeout(runSimulation, 50);
   }
 
   function runSimulation() {
@@ -62,9 +109,15 @@ const Backtester = (() => {
     const startBank = parseFloat(document.getElementById('bkStartBank').value) || 100;
     const payout = parseFloat(document.getElementById('bkPayout').value) / 100 || 0.8;
     const baseAmount = parseFloat(document.getElementById('bkAmount').value) || 10;
-    const mgmt = document.getElementById('bkMgmtType').value;
+    
+    // Checkboxes de gerenciamento
+    const useMartingale = document.getElementById('bkUseMartingale')?.checked ?? true;
+    const useSoros = document.getElementById('bkUseSoros')?.checked ?? false;
+    const useCycles = document.getElementById('bkUseCycles')?.checked ?? false;
+    
     const maxGales = parseInt(document.getElementById('bkMartingales').value) || 0;
     const galeFactor = parseFloat(document.getElementById('bkGaleFactor').value) || 2.0;
+    const maxSorosLevel = parseInt(document.getElementById('bkSorosLevel')?.value) || 1;
     const waitCycleBreak = document.getElementById('bkWaitCycleBreak')?.checked ?? true;
 
     const candles = activeData.candles;
@@ -82,18 +135,37 @@ const Backtester = (() => {
     let draws = 0;
     
     let currentAmount = baseAmount;
-    let galeStep = 0;
     let sorosStep = 0;
-    let lastResult = 'WIN';
+
+    // Ciclos
+    let cycles = [];
+    let currentCycleIndex = 0;
+    let currentStepIndex = 0;
+    
+    if (useCycles) {
+      const configText = document.getElementById('bkCyclesConfig').value || '';
+      const lines = configText.split('\n');
+      lines.forEach(line => {
+        if (!line.trim()) return;
+        const parts = line.split(':');
+        if (parts.length >= 2) {
+          const valuesStr = parts[1].split(',');
+          const values = valuesStr.map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
+          if (values.length > 0) cycles.push(values);
+        } else {
+          const values = line.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
+          if (values.length > 0) cycles.push(values);
+        }
+      });
+      if (cycles.length === 0) {
+        cycles = [[baseAmount]];
+      }
+    }
 
     const bankHistory = [startBank];
     const labels = ['Início'];
     const simOps = [];
     let sequenceColorToBreak = null;
-
-    // Fazer a simulação cronológica (do mais antigo para o mais recente)
-    // Se o catalogador já reverteu a lista, garantimos a ordem cronológica
-    // A maioria das APIs fornece cronológico por padrão.
     
     const K = rawPattern ? rawPattern.length : 1;
 
@@ -110,7 +182,6 @@ const Backtester = (() => {
 
       if (isTimeMode) {
         // Modo por Minuto da Hora
-        // rawPattern ex: "15" (minuto 15)
         const targetMin = parseInt(rawPattern.replace(':', ''));
         const candleMin = candles[i].time.getMinutes();
         if (candleMin === targetMin) {
@@ -118,7 +189,6 @@ const Backtester = (() => {
         }
       } else if (isExhaustion) {
         // Modo Exaustão de Tendência
-        // Checar se as K velas anteriores são todas da mesma cor
         const firstColor = candles[i - K].color;
         let allSame = true;
         for (let j = i - K + 1; j < i; j++) {
@@ -127,8 +197,6 @@ const Backtester = (() => {
             break;
           }
         }
-        
-        // Se a cor for igual à cor da sequência que gerou o padrão
         if (allSame && firstColor === rawPattern[0]) {
           isMatch = true;
         }
@@ -144,7 +212,7 @@ const Backtester = (() => {
       }
 
       if (isMatch) {
-        // Simular a operação na vela atual e aplicar gestão financeira
+        const idxSignal = i;
         const targetColor = entry === 'CALL' ? 'G' : 'R';
         
         let opProfit = 0;
@@ -152,23 +220,15 @@ const Backtester = (() => {
         let opResult = 'LOSS';
         let opInfo = '';
 
-        if (mgmt === 'none') {
-          // Mão Fixa
-          const actualColor = candles[i].color;
-          const isWin = actualColor === targetColor;
-          if (isWin) {
-            opProfit = baseAmount * payout;
-            wins++;
-            opResult = 'WIN';
-          } else {
-            opProfit = -baseAmount;
-            losses++;
-            opResult = 'LOSS';
-          }
-          opInfo = 'Mão Fixa';
-        } 
-        
-        else if (mgmt === 'martingale') {
+        let entryAmount = baseAmount;
+        if (useCycles && cycles.length > 0) {
+          entryAmount = cycles[currentCycleIndex][currentStepIndex];
+        } else if (useSoros && sorosStep > 0) {
+          entryAmount = currentAmount;
+        }
+
+        // Lógica de Execução com Martingale (se ativo)
+        if (useMartingale && !useCycles) {
           let cycleLossesAccumulated = 0;
           let wonGale = false;
           let galeUsedText = 'Mão 1';
@@ -176,7 +236,7 @@ const Backtester = (() => {
           for (let g = 0; g <= maxGales; g++) {
             if (i + g >= candles.length) break;
             candlesUsed = g;
-            const currentGaleAmount = Number((baseAmount * Math.pow(galeFactor, g)).toFixed(2));
+            const currentGaleAmount = Number((entryAmount * Math.pow(galeFactor, g)).toFixed(2));
             
             if (candles[i + g].color === targetColor) {
               opProfit = (currentGaleAmount * payout) - cycleLossesAccumulated;
@@ -196,30 +256,75 @@ const Backtester = (() => {
           }
           opResult = wonGale ? 'WIN' : 'LOSS';
           opInfo = galeUsedText;
+          
+          // Se tiver Soros combinado com Martingale (SorosGale)
+          if (useSoros) {
+            if (opResult === 'WIN') {
+              if (sorosStep < maxSorosLevel) {
+                sorosStep++;
+                const winAmount = entryAmount * Math.pow(galeFactor, candlesUsed);
+                const winProfit = (winAmount * payout) - (winAmount - entryAmount);
+                currentAmount = Number((entryAmount + winProfit).toFixed(2));
+              } else {
+                sorosStep = 0;
+                currentAmount = baseAmount;
+              }
+            } else {
+              sorosStep = 0;
+              currentAmount = baseAmount;
+            }
+          }
         } 
         
-        else if (mgmt === 'soros') {
+        else {
+          // Sem Martingale imediato (Mão Fixa, Soros Puro, ou Ciclos)
           const actualColor = candles[i].color;
           const isWin = actualColor === targetColor;
+          
           if (isWin) {
-            opProfit = currentAmount * payout;
+            opProfit = entryAmount * payout;
             wins++;
             opResult = 'WIN';
-            opInfo = sorosStep === 0 ? 'Mão Base' : `Soros Nível ${sorosStep}`;
-            if (sorosStep < 1) { // Soros nível 1 simples na simulação
-              sorosStep++;
-              currentAmount = Number((baseAmount + (baseAmount * payout)).toFixed(2));
+            
+            if (useCycles) {
+              opInfo = `Ciclo ${currentCycleIndex + 1} Passo ${currentStepIndex + 1}`;
+              currentCycleIndex = 0;
+              currentStepIndex = 0;
+            } else if (useSoros) {
+              opInfo = sorosStep === 0 ? 'Mão Base' : `Soros Nível ${sorosStep}`;
+              if (sorosStep < maxSorosLevel) {
+                sorosStep++;
+                currentAmount = Number((entryAmount + opProfit).toFixed(2));
+              } else {
+                currentAmount = baseAmount;
+                sorosStep = 0;
+              }
             } else {
-              currentAmount = baseAmount;
-              sorosStep = 0;
+              opInfo = 'Mão Fixa';
             }
           } else {
-            opProfit = -currentAmount;
+            opProfit = -entryAmount;
             losses++;
             opResult = 'LOSS';
-            opInfo = sorosStep === 0 ? 'Mão Base' : `Soros Nível ${sorosStep}`;
-            currentAmount = baseAmount;
-            sorosStep = 0;
+            
+            if (useCycles) {
+              opInfo = `Ciclo ${currentCycleIndex + 1} Passo ${currentStepIndex + 1}`;
+              currentStepIndex++;
+              if (currentStepIndex >= cycles[currentCycleIndex].length) {
+                currentCycleIndex++;
+                currentStepIndex = 0;
+                if (currentCycleIndex >= cycles.length) {
+                  currentCycleIndex = 0;
+                  currentStepIndex = 0;
+                }
+              }
+            } else if (useSoros) {
+              opInfo = sorosStep === 0 ? 'Mão Base' : `Soros Nível ${sorosStep}`;
+              currentAmount = baseAmount;
+              sorosStep = 0;
+            } else {
+              opInfo = 'Mão Fixa';
+            }
           }
         }
 
@@ -264,6 +369,14 @@ const Backtester = (() => {
 
         // Pular as velas adicionais que já foram consumidas pelas tentativas de Martingale
         i += candlesUsed;
+
+        // Evitar reconta de velas na mesma sequência contínua (exaustão/continuidade)
+        if (isExhaustion) {
+          const minNextIdx = idxSignal + K - 1;
+          if (i < minNextIdx) {
+            i = minNextIdx;
+          }
+        }
 
         if (waitCycleBreak && rawPattern && rawPattern.length > 0) {
           sequenceColorToBreak = rawPattern[0];

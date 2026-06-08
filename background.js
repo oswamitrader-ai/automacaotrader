@@ -51,7 +51,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         amount: message.amount,
         payout: message.payout,
         pair: message.pair,
-        timeframe: message.timeframe
+        timeframe: message.timeframe,
+        accountType: message.accountType
       }, (response) => {
         sendResponse(response);
       });
@@ -161,7 +162,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     
     const targetTabId = brokerTabsList[0];
-    console.log(`[Background] Solicitando candles OTC de ${message.pair} (fallback ID ${activeId}) via executeScript com allFrames:true na aba ${targetTabId}`);
+    const isOTC = message.pair.endsWith('-OTC');
+    const marketLabel = isOTC ? 'OTC' : 'Mercado Real';
+    console.log(`[Background] Solicitando candles do ${marketLabel} para ${message.pair} (fallback ID ${activeId}) via executeScript na aba ${targetTabId}`);
     
     // Executa uma função async diretamente no MAIN world em todos os frames da aba da corretora
     chrome.scripting.executeScript({
@@ -432,7 +435,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Buscar velas reais da Twelve Data em background para evitar CORS
   if (message.action === "fetch_twelvedata_candles") {
-    const url = `https://api.twelvedata.com/time_series?symbol=${message.symbol}&interval=${message.interval}&outputsize=${message.limit}&apikey=${message.apiKey}`;
+    const url = `https://api.twelvedata.com/time_series?symbol=${message.symbol}&interval=${message.interval}&outputsize=${message.limit}&timezone=UTC&order=ASC&apikey=${message.apiKey}`;
     fetch(url)
       .then(res => {
         if (!res.ok) throw new Error(`Twelve Data HTTP ${res.status}`);
@@ -445,6 +448,49 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.error("[Background] Erro Twelve Data fetch:", err);
         sendResponse({ status: "error", error: err.message });
       });
+    return true;
+  }
+
+  // Buscar calendário econômico da Investing.com
+  if (message.action === "fetch_economic_calendar") {
+    const url = 'https://ca-economic-calendar.investing.com/?promo_link=&columns=currency,importance,event&importance=1,2,3&features=datepicker,timezone&countries=25,32,6,37,7,5,22,12,4,35,36,110,43,11,26,10,39,120,41,42,24,14,118,53,38,111,113,45,51,34,52,47,19,48,122,125,56,8,55,100,103,107,13,57,109,102,112,123,46,124,147,15,104,119,105,108,121,50,44&calType=day&timeZone=12&lang=12';
+    
+    // Função de Fallback local caso a aba da corretora não responda ou não exista
+    const fetchLocalFallback = () => {
+      console.log("[Background] Executando fallback: Buscando calendário econômico diretamente no background...");
+      fetch(url)
+        .then(res => {
+          if (!res.ok) throw new Error(`Investing HTTP ${res.status}`);
+          return res.text();
+        })
+        .then(html => {
+          sendResponse({ status: "success", html: html });
+        })
+        .catch(err => {
+          console.error("[Background] Erro Investing fetch local:", err);
+          sendResponse({ status: "error", error: err.message });
+        });
+    };
+
+    if (brokerTabs.size > 0) {
+      // Obter o tabId da primeira corretora registrada no Map
+      const firstTabId = brokerTabs.keys().next().value;
+      console.log(`[Background] Delegando fetch do calendário econômico para a aba ${firstTabId}`);
+      
+      chrome.tabs.sendMessage(firstTabId, { action: "fetch_economic_calendar_dom", url: url }, (response) => {
+        // Verificar se houve erro no envio da mensagem ou se a resposta veio vazia/erro
+        if (chrome.runtime.lastError || !response || response.status === "error") {
+          console.warn("[Background] Falha ao obter calendário via aba da corretora. Acionando fallback...", chrome.runtime.lastError || response?.error);
+          fetchLocalFallback();
+        } else {
+          console.log("[Background] Calendário econômico obtido com sucesso via aba da corretora!");
+          sendResponse(response);
+        }
+      });
+    } else {
+      console.log("[Background] Nenhuma aba de corretora conectada. Usando fetch local.");
+      fetchLocalFallback();
+    }
     return true;
   }
 });
@@ -481,6 +527,7 @@ function notifyDashboardStatus() {
 // Helpers para mapear ativos OTC e timeframes da IQ Option/Exnova
 function getActiveIdForOTC(pair) {
   const ids = {
+    // OTC Pairs
     'EUR/USD-OTC': 76,
     'GBP/USD-OTC': 77,
     'EUR/GBP-OTC': 79,
@@ -502,7 +549,31 @@ function getActiveIdForOTC(pair) {
     'CHF/JPY-OTC': 176,
     'EUR/CHF-OTC': 177,
     'AUD/CHF-OTC': 178,
-    'CAD/CHF-OTC': 179
+    'CAD/CHF-OTC': 179,
+    // Real Pairs
+    'EUR/USD': 1,
+    'GBP/USD': 2,
+    'USD/JPY': 3,
+    'EUR/JPY': 4,
+    'GBP/JPY': 5,
+    'USD/CHF': 6,
+    'EUR/GBP': 7,
+    'EUR/CHF': 8,
+    'AUD/USD': 9,
+    'USD/CAD': 10,
+    'NZD/USD': 11,
+    'AUD/CAD': 99,
+    'AUD/CHF': 100,
+    'AUD/JPY': 101,
+    'GBP/CAD': 102,
+    'GBP/CHF': 103,
+    'GBP/AUD': 104,
+    'NZD/JPY': 105,
+    'CAD/JPY': 106,
+    'EUR/CAD': 107,
+    'EUR/AUD': 108,
+    'CHF/JPY': 109,
+    'CAD/CHF': 110
   };
   return ids[pair] || 76; // Padrão EUR/USD-OTC se não encontrar
 }
@@ -552,7 +623,19 @@ function getPairForActiveId(activeId) {
     8: 'EUR/CHF',
     9: 'AUD/USD',
     10: 'USD/CAD',
-    11: 'NZD/USD'
+    11: 'NZD/USD',
+    99: 'AUD/CAD',
+    100: 'AUD/CHF',
+    101: 'AUD/JPY',
+    102: 'GBP/CAD',
+    103: 'GBP/CHF',
+    104: 'GBP/AUD',
+    105: 'NZD/JPY',
+    106: 'CAD/JPY',
+    107: 'EUR/CAD',
+    108: 'EUR/AUD',
+    109: 'CHF/JPY',
+    110: 'CAD/CHF'
   };
   return pairs[activeId] || 'EUR/USD-OTC';
 }

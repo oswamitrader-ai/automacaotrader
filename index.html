@@ -718,121 +718,159 @@ C3: 25, 55"></textarea>
       </div>
     </section>
 
+    <!-- ==================== BACKTEST PAGE ==================== -->
+    <section id="page-backtest" class="page-section">
+      <div style="margin-bottom: 15px;">
+        <button class="btn btn-outline btn-sm" id="btnBacktestBack" style="display:inline-flex; align-items:center; gap:5px;">
+          ← Voltar ao Catalogador
+        </button>
+      </div>
+
+      <div class="backtest-page-grid">
+        <!-- COLUNA ESQUERDA: Gráfico + Parâmetros + Estatísticas -->
+        <div class="backtest-left-col">
+          <!-- Título -->
+          <h2 id="backtestModalTitle" style="font-size: 1.1rem; color: var(--neon-cyan); margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 1px solid var(--border-color);">
+            📊 Simulador e Backtesting de Padrão
+          </h2>
+
+          <!-- Gráfico -->
+          <div style="position: relative; height: 300px; background: rgba(0,0,0,0.25); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); box-shadow: inset 0 0 10px rgba(0,0,0,0.5); margin-bottom: 15px;">
+            <canvas id="backtestChart"></canvas>
+          </div>
+
+          <!-- Grid de Parâmetros e Estatísticas lado a lado -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+            <!-- Card de Parâmetros -->
+            <div style="background: var(--surface-light); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
+              <h4 style="color:var(--neon-cyan); margin-top:0; margin-bottom:12px; font-size:0.85rem; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:5px;">⚙️ Parâmetros de Simulação</h4>
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <span style="font-size:0.75rem; color:var(--text-secondary)">Banca Inicial:</span>
+                  <input type="number" id="bkStartBank" value="100" min="10" max="10000" style="width:80px; font-size:0.75rem; padding:4px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <span style="font-size:0.75rem; color:var(--text-secondary)">Payout (%):</span>
+                  <input type="number" id="bkPayout" value="80" min="20" max="100" style="width:80px; font-size:0.75rem; padding:4px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <span style="font-size:0.75rem; color:var(--text-secondary)">Valor Entrada:</span>
+                  <input type="number" id="bkAmount" value="10" min="2" style="width:80px; font-size:0.75rem; padding:4px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
+                </div>
+                <div style="display:flex; flex-direction:column; gap:6px; border-top:1px solid rgba(255,255,255,0.05); padding-top:8px; margin-top:4px;">
+                  <span style="font-size:0.75rem; color:var(--text-secondary); font-weight:bold; margin-bottom:4px;">Gestão Financeira (Combináveis):</span>
+                  <label style="display:flex; align-items:center; gap:6px; cursor:pointer; color:var(--text-primary); font-size:0.7rem;">
+                    <input type="checkbox" id="bkUseMartingale" checked style="accent-color:var(--neon-cyan);"> Martingale (Recuperação no Loss)
+                  </label>
+                  <label style="display:flex; align-items:center; gap:6px; cursor:pointer; color:var(--text-primary); font-size:0.7rem;">
+                    <input type="checkbox" id="bkUseSoros" style="accent-color:var(--neon-cyan);"> Soros (Alavancagem no Win)
+                  </label>
+                  <label style="display:flex; align-items:center; gap:6px; cursor:pointer; color:var(--text-primary); font-size:0.7rem;">
+                    <input type="checkbox" id="bkUseCycles" style="accent-color:var(--neon-cyan);"> Ciclos (Tabela de Mãos)
+                  </label>
+                </div>
+
+                <!-- Configurações adicionais de Martingale -->
+                <div id="bkMgmtMartingaleSettings" style="display:flex; flex-direction:column; gap:6px; border-top:1px solid rgba(255,255,255,0.03); padding-top:6px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:0.7rem; color:var(--text-secondary)">Martingale (Nível):</span>
+                    <select id="bkMartingales" style="width:75px; font-size:0.7rem; padding:2px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
+                      <option value="0">Sem Gale</option>
+                      <option value="1" selected>1 Gale</option>
+                      <option value="2">2 Gales</option>
+                      <option value="3">3 Gales</option>
+                    </select>
+                  </div>
+                  <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:0.7rem; color:var(--text-secondary)">Fator Gale:</span>
+                    <input type="number" id="bkGaleFactor" value="2.0" step="0.1" min="1" style="width:75px; font-size:0.7rem; padding:3px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
+                  </div>
+                </div>
+
+                <!-- Configurações adicionais de Soros -->
+                <div id="bkMgmtSorosSettings" style="display:none; justify-content:space-between; align-items:center; border-top:1px solid rgba(255,255,255,0.03); padding-top:6px;">
+                  <span style="font-size:0.7rem; color:var(--text-secondary)">Soros (Nível Máx):</span>
+                  <select id="bkSorosLevel" style="width:75px; font-size:0.7rem; padding:2px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
+                    <option value="1" selected>Nível 1</option>
+                    <option value="2">Nível 2</option>
+                    <option value="3">Nível 3</option>
+                  </select>
+                </div>
+
+                <!-- Configurações adicionais de Ciclos -->
+                <div id="bkMgmtCyclesSettings" style="display:none; flex-direction:column; gap:4px; border-top:1px solid rgba(255,255,255,0.03); padding-top:6px;">
+                  <span style="font-size:0.7rem; color:var(--neon-green)">Tabela de Ciclos (Mãos):</span>
+                  <textarea id="bkCyclesConfig" rows="2" style="font-size:0.65rem; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px; padding:4px; width:100%; resize:vertical;" placeholder="C1: 10, 20&#10;C2: 15, 30&#10;C3: 25, 55"></textarea>
+                </div>
+
+                <div style="display:flex; align-items:center; gap:5px; margin-top:8px; border-top: 1px solid rgba(255,255,255,0.05); padding-top:8px;">
+                  <label style="display:flex; align-items:center; gap:6px; font-size:0.7rem; color:var(--text-secondary); cursor:pointer;">
+                    <input type="checkbox" id="bkWaitCycleBreak" checked> Quebra de Ciclo (Exaustão/Fluxo)
+                  </label>
+                </div>
+              </div>
+              <button id="btnRunBacktest" class="btn btn-primary btn-sm" style="width:100%; margin-top:12px; font-size:0.75rem; height:32px;">⚡ Rodar Simulação</button>
+            </div>
+
+            <!-- Card de Estatísticas -->
+            <div style="background: var(--surface-light); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; display:flex; flex-direction:column; gap:8px;">
+              <h4 style="color:var(--neon-green); font-size:0.85rem; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:5px; margin:0;">📈 Estatísticas Finais</h4>
+              <div style="display:flex; justify-content:space-between; font-size:0.75rem;">
+                <span style="color:var(--text-secondary)">Saldo Final:</span>
+                <span id="bkStatEndBank" style="font-weight:bold; color:var(--neon-green)">$ 100.00</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; font-size:0.75rem;">
+                <span style="color:var(--text-secondary)">ROI Acumulado:</span>
+                <span id="bkStatROI" style="font-weight:bold; color:var(--neon-cyan)">0.0%</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; font-size:0.75rem;">
+                <span style="color:var(--text-secondary)">Assertividade:</span>
+                <span id="bkStatWinRate" style="font-weight:bold;">0%</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; font-size:0.75rem;">
+                <span style="color:var(--text-secondary)">Wins / Losses:</span>
+                <span id="bkStatWinLoss" style="font-weight:bold;">0 W - 0 L</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; font-size:0.75rem;">
+                <span style="color:var(--text-secondary)">Máx Drawdown:</span>
+                <span id="bkStatDrawdown" style="font-weight:bold; color:var(--neon-red)">0%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- COLUNA DIREITA: Histórico Detalhado -->
+        <div class="backtest-right-col">
+          <h4 style="color:var(--neon-cyan); margin:0 0 10px 0; font-size:0.9rem; padding-bottom: 8px; border-bottom: 1px solid var(--border-color);">
+            📋 Histórico Detalhado
+          </h4>
+          <div class="backtest-ops-scroll">
+            <table class="data-table" style="font-size:0.75rem; width: 100%;">
+              <thead>
+                <tr>
+                  <th>Data/Hora</th>
+                  <th>Padrão</th>
+                  <th>Direção</th>
+                  <th>Resultado</th>
+                  <th>Info</th>
+                  <th>P/L</th>
+                  <th>Saldo</th>
+                </tr>
+              </thead>
+              <tbody id="backtestOpsTableBody">
+                <tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding: 40px 0;">Rode uma simulação para ver os resultados aqui.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
   </main>
 
 </div>
 
-<!-- ====== BACKTEST MODAL ====== -->
-<div class="modal-overlay" id="backtestModal">
-  <div class="modal" style="max-width: 900px; width: 95%;">
-    <div class="modal-header">
-      <h2 class="modal-title" id="backtestModalTitle">📊 Simulador e Backtesting de Padrão</h2>
-      <button class="modal-close" onclick="UI.closeModal('backtestModal')">&times;</button>
-    </div>
-    <div class="modal-body" style="display:flex; gap:20px; flex-wrap:wrap; padding: 15px;">
-      <!-- Coluna da Esquerda: Gráfico -->
-      <div style="flex:2; min-width:300px;">
-        <div style="background: rgba(0,0,0,0.25); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); box-shadow: inset 0 0 10px rgba(0,0,0,0.5);">
-          <canvas id="backtestChart" style="width:100%; height:320px;"></canvas>
-        </div>
-      </div>
-      
-      <!-- Coluna da Direita: Estatísticas e Parâmetros -->
-      <div style="flex:1; min-width:250px; display:flex; flex-direction:column; gap:15px;">
-        <!-- Card de Parâmetros -->
-        <div style="background: var(--surface-light); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
-          <h4 style="color:var(--neon-cyan); margin-top:0; margin-bottom:12px; font-size:0.85rem; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:5px;">Parâmetros de Simulação</h4>
-          <div style="display:flex; flex-direction:column; gap:8px;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span style="font-size:0.75rem; color:var(--text-secondary)">Banca Inicial:</span>
-              <input type="number" id="bkStartBank" value="100" min="10" max="10000" style="width:80px; font-size:0.75rem; padding:4px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
-            </div>
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span style="font-size:0.75rem; color:var(--text-secondary)">Payout (%):</span>
-              <input type="number" id="bkPayout" value="80" min="20" max="100" style="width:80px; font-size:0.75rem; padding:4px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
-            </div>
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span style="font-size:0.75rem; color:var(--text-secondary)">Valor Entrada:</span>
-              <input type="number" id="bkAmount" value="10" min="2" style="width:80px; font-size:0.75rem; padding:4px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
-            </div>
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <span style="font-size:0.75rem; color:var(--text-secondary)">Gerenciamento:</span>
-              <select id="bkMgmtType" style="width:100px; font-size:0.75rem; padding:4px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
-                <option value="none">Mão Fixa</option>
-                <option value="martingale" selected>Martingale</option>
-                <option value="soros">Soros</option>
-              </select>
-            </div>
-            <div id="bkMgmtSettingsContainer" style="display:flex; flex-direction:column; gap:8px;">
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-size:0.75rem; color:var(--text-secondary)">Limite Gales:</span>
-                <input type="number" id="bkMartingales" value="1" min="0" max="3" style="width:80px; font-size:0.75rem; padding:4px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
-              </div>
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-size:0.75rem; color:var(--text-secondary)">Fator Multiplicar:</span>
-                <input type="number" id="bkGaleFactor" value="2.0" step="0.1" style="width:80px; font-size:0.75rem; padding:4px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
-              </div>
-            </div>
-            <div style="display:flex; align-items:center; gap:5px; margin-top:8px; border-top: 1px solid rgba(255,255,255,0.05); padding-top:8px;">
-              <label style="display:flex; align-items:center; gap:6px; font-size:0.7rem; color:var(--text-secondary); cursor:pointer;">
-                <input type="checkbox" id="bkWaitCycleBreak" checked> Quebra de Ciclo (Exaustão/Fluxo)
-              </label>
-            </div>
-          </div>
-          <button id="btnRunBacktest" class="btn btn-primary btn-sm" style="width:100%; margin-top:12px; font-size:0.75rem; height:32px;">⚡ Rodar Simulação</button>
-        </div>
-        
-        <!-- Card de Estatísticas -->
-        <div style="background: var(--surface-light); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; display:flex; flex-direction:column; gap:8px;">
-          <h4 style="color:var(--neon-green); font-size:0.85rem; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:5px; margin:0;">Estatísticas Finais</h4>
-          <div style="display:flex; justify-content:space-between; font-size:0.75rem;">
-            <span style="color:var(--text-secondary)">Saldo Final:</span>
-            <span id="bkStatEndBank" style="font-weight:bold; color:var(--neon-green)">$ 100.00</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; font-size:0.75rem;">
-            <span style="color:var(--text-secondary)">ROI Acumulado:</span>
-            <span id="bkStatROI" style="font-weight:bold; color:var(--neon-cyan)">0.0%</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; font-size:0.75rem;">
-            <span style="color:var(--text-secondary)">Assertividade:</span>
-            <span id="bkStatWinRate" style="font-weight:bold;">0%</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; font-size:0.75rem;">
-            <span style="color:var(--text-secondary)">Wins / Losses:</span>
-            <span id="bkStatWinLoss" style="font-weight:bold;">0 W - 0 L</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; font-size:0.75rem;">
-            <span style="color:var(--text-secondary)">Máx Drawdown:</span>
-            <span id="bkStatDrawdown" style="font-weight:bold; color:var(--neon-red)">0%</span>
-          </div>
-        </div>
-      </div>
 
-      <!-- Tabela de Histórico de Operações do Backtest -->
-      <div style="width: 100%; margin-top: 15px; border-top: 1px solid var(--border-color); padding-top: 15px;">
-        <h4 style="color:var(--neon-cyan); margin-top:0; margin-bottom:10px; font-size:0.85rem;">Histórico Detalhado das Operações Simuladas</h4>
-        <div class="table-container" style="max-height: 150px; overflow-y: auto;">
-          <table class="data-table" style="font-size:0.75rem; width: 100%;">
-            <thead>
-              <tr>
-                <th>Data/Hora</th>
-                <th>Padrão</th>
-                <th>Direção</th>
-                <th>Resultado</th>
-                <th>Informação</th>
-                <th>Lucro/Prejuízo</th>
-                <th>Saldo da Banca</th>
-              </tr>
-            </thead>
-            <tbody id="backtestOpsTableBody">
-              <!-- Preenchido dinamicamente pelo JS -->
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- Scripts -->
 <script src="js/storage.js"></script>

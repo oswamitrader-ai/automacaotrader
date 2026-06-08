@@ -112,10 +112,27 @@ chrome.runtime.sendMessage({
 
 // Ouvir ordens vindas do background script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // Requisitar candles OTC via WebSocket ativo
+  // Buscar calendário econômico via DOM para evitar bloqueios do Cloudflare no background service worker
+  if (message.action === "fetch_economic_calendar_dom") {
+    fetch(message.url)
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.text();
+      })
+      .then(html => {
+        sendResponse({ status: "success", html: html });
+      })
+      .catch(err => {
+        console.error("[BinaryOps Content] Erro ao buscar calendário:", err);
+        sendResponse({ status: "error", error: err.message });
+      });
+    return true; // mantém o canal aberto
+  }
+
+  // Requisitar candles da corretora via WebSocket ativo
   if (message.action === "request_otc_candles_from_ws") {
     currentRequestedActiveId = message.activeId;
-    console.log(`[BinaryOps Content] Recebida solicitação de candles OTC para activeId: ${currentRequestedActiveId}, size: ${message.size}`);
+    console.log(`[BinaryOps Content] Recebida solicitação de candles para activeId: ${currentRequestedActiveId}, size: ${message.size}`);
     
     // Envia pedido para o MAIN world via postMessage (não CustomEvent!)
     window.postMessage({
@@ -134,7 +151,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     setTimeout(() => {
       if (currentCandlesResolver) {
         console.warn(`[BinaryOps Content] Timeout de 15s estourado para activeId: ${currentRequestedActiveId}`);
-        currentCandlesResolver({ status: "error", error: "A corretora demorou muito para responder com o histórico de candles de OTC." });
+        currentCandlesResolver({ status: "error", error: "A corretora demorou muito para responder com o histórico de candles." });
         currentCandlesResolver = null;
         currentRequestedActiveId = null;
       }
@@ -144,29 +161,82 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === "place_order") {
-    // Verificar previamente se este frame possui tanto o campo de valor quanto os botões de trading.
-    // Se não contiver ambos, ignorar silenciosamente para deixar o frame correto responder.
-    const sel = SELECTORS[broker] || SELECTORS.exnova;
-    const amountEl = document.querySelector(sel.amountInput) || findInputByPlaceholderOrLabel();
-    
-    // Se não tiver o campo de valor, não é o frame principal de trading
-    if (!amountEl) {
-      console.log(`[BinaryOps Content Script] Ignorando frame ${window.location.href} (sem input de valor)`);
+    // Apenas executar no frame principal (Top Frame) para evitar ordens duplicadas via iframes.
+    if (window !== window.top) {
       return false;
     }
 
     console.log(`[BinaryOps Content Script] Executando ordem no frame correto: ${window.location.href}`);
-    executeTradingOrder(message.direction, message.amount).then((success) => {
-      if (success) {
-        // Iniciar monitoramento do resultado da operação
+    
+    // ============================================
+    // ESTRATÉGIA 1 (PRIMÁRIA): Envio via WebSocket da corretora
+    // Muito mais confiável que clicar em botões DOM/Canvas.
+    // ============================================
+    const wsRequestId = 'content_order_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
+    let wsResponded = false;
+    let wsTimeout = null;
+
+    const wsResultHandler = (event) => {
+      if (!event.data || event.data.type !== 'binaryops_order_result') return;
+      if (event.data.requestId !== wsRequestId) return;
+      
+      wsResponded = true;
+      clearTimeout(wsTimeout);
+      window.removeEventListener('message', wsResultHandler);
+
+      if (event.data.status === 'success') {
+        console.log(`[BinaryOps Content Script] ✅ Ordem executada via WebSocket API!`);
         monitorOperationResult(message.direction, message.amount, message.payout, message.pair, message.timeframe);
-        sendResponse({ status: "success", msg: "Ordem executada com sucesso" });
+        sendResponse({ status: "success", msg: "Ordem executada via WebSocket API da corretora" });
       } else {
-        sendResponse({ status: "error", error: "Não foi possível acionar os botões da corretora" });
+        console.warn(`[BinaryOps Content Script] ⚠️ WebSocket falhou: ${event.data.error}. Tentando via DOM...`);
+        // FALLBACK: Tentar via clique DOM
+        executeTradingOrder(message.direction, message.amount).then((success) => {
+          if (success) {
+            monitorOperationResult(message.direction, message.amount, message.payout, message.pair, message.timeframe);
+            sendResponse({ status: "success", msg: "Ordem executada via clique DOM (fallback)" });
+          } else {
+            sendResponse({ status: "error", error: "Falha no WebSocket e no clique DOM" });
+          }
+        }).catch((err) => {
+          sendResponse({ status: "error", error: err.message });
+        });
       }
-    }).catch((err) => {
-      sendResponse({ status: "error", error: err.message });
-    });
+    };
+
+    window.addEventListener('message', wsResultHandler);
+
+    // Enviar pedido para o MAIN world (injected.js) via postMessage
+    window.postMessage({
+      type: 'binaryops_place_order_ws',
+      direction: message.direction,
+      amount: message.amount,
+      pair: message.pair,
+      timeframe: message.timeframe,
+      requestId: wsRequestId,
+      accountType: message.accountType
+    }, '*');
+
+    // Timeout: se o MAIN world não responder em 5s, cair pro DOM
+    wsTimeout = setTimeout(() => {
+      if (!wsResponded) {
+        wsResponded = true;
+        window.removeEventListener('message', wsResultHandler);
+        console.warn(`[BinaryOps Content Script] ⚠️ Timeout do WebSocket (5s). Tentando via DOM...`);
+        
+        executeTradingOrder(message.direction, message.amount).then((success) => {
+          if (success) {
+            monitorOperationResult(message.direction, message.amount, message.payout, message.pair, message.timeframe);
+            sendResponse({ status: "success", msg: "Ordem executada via clique DOM (fallback timeout)" });
+          } else {
+            sendResponse({ status: "error", error: "Timeout no WebSocket e falha no clique DOM" });
+          }
+        }).catch((err) => {
+          sendResponse({ status: "error", error: err.message });
+        });
+      }
+    }, 5000);
+
     return true;
   }
 
@@ -231,10 +301,11 @@ async function executeTradingOrder(direction, amount) {
   
   // 1. Achar o campo de valor e definir o valor
   let amountEl = null;
+  let coords = null;
   
   try {
     const coordsObj = await chrome.storage.local.get('calibrationCoords');
-    const coords = coordsObj.calibrationCoords || {};
+    coords = coordsObj.calibrationCoords || {};
     
     if (coords['AMOUNT'] && coords['AMOUNT'].x) {
       console.log(`[BinaryOps] Usando coordenada CALIBRADA para o campo de VALOR em X:${coords['AMOUNT'].x}, Y:${coords['AMOUNT'].y}`);

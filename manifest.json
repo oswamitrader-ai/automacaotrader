@@ -15,7 +15,9 @@
     "https://*.bullex.com/*",
     "https://nfs.faireconomy.media/*",
     "https://api.binance.com/*",
-    "https://api.twelvedata.com/*"
+    "https://api.twelvedata.com/*",
+    "https://ca-economic-calendar.investing.com/*",
+    "https://*.investing.com/*"
   ],
   "action": {
     "default_title": "Abrir Dashboard de Opções Binárias"

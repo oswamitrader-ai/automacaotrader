@@ -55,7 +55,8 @@ const UI = (() => {
       goals: '🎯 <span>Metas</span>',
       settings: '⚙️ <span>Configurações</span>',
       bot: '🤖 <span>Robô de Automação</span>',
-      cataloger: '🔍 <span>Catalogador Probabilístico</span>'
+      cataloger: '🔍 <span>Catalogador Probabilístico</span>',
+      backtest: '📊 <span>Backtesting e Simulação</span>'
     };
     const titleEl = document.getElementById('pageTitle');
     if (titleEl) titleEl.innerHTML = titles[page] || '';
