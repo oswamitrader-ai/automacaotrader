@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "Binary Options Automation & Dashboard",
+  "version": "1.0.0",
+  "description": "Dashboard completo de Opções Binárias integrado com robô de automação para Exnova, IQ Option e Bullex.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*.exnova.com/*",
+    "https://*.iqoption.com/*",
+    "https://*.bullex.com/*",
+    "https://nfs.faireconomy.media/*",
+    "https://api.binance.com/*",
+    "https://api.twelvedata.com/*"
+  ],
+  "action": {
+    "default_title": "Abrir Dashboard de Opções Binárias"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.exnova.com/*",
+        "https://*.iqoption.com/*",
+        "https://*.bullex.com/*"
+      ],
+      "js": ["js/injected.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://*.exnova.com/*",
+        "https://*.iqoption.com/*",
+        "https://*.bullex.com/*"
+      ],
+      "js": ["js/content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["js/content.js", "css/style.css"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

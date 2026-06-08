@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Dashboard profissional para gestão e análise de operações em opções binárias. Controle sua banca, assertividade e resultados.">
+  <title>Binary Options Dashboard | Central de Operações</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/chart.umd.min.js"></script>
+  <script src="js/supabase.js"></script>
+</head>
+<body>
+
+<!-- Toast Container -->
+<div id="toastContainer" class="toast-container"></div>
+
+<!-- Mobile Toggle -->
+<button id="mobileToggle" class="mobile-toggle">☰</button>
+
+<!-- Auth Container -->
+<div class="auth-container" id="auth-container">
+  <div class="auth-card">
+    <div class="auth-logo">Binary Ops</div>
+    <h2 id="authTitle" style="text-align:center;color:var(--text-light);margin-bottom:8px;">Acesso ao Dashboard</h2>
+    <p id="authSubtitle" style="text-align:center;color:var(--text-muted);font-size:0.9rem;margin-bottom:24px;">Entre com suas credenciais para continuar</p>
+    
+    <form id="loginForm">
+      <div class="form-group" id="authNameGroup" style="display:none;">
+        <label class="form-label">Nome Completo</label>
+        <input type="text" class="form-input" id="authName" placeholder="Seu nome completo">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input type="email" class="form-input" id="authEmail" placeholder="seu@email.com" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Senha</label>
+        <input type="password" class="form-input" id="authPassword" placeholder="••••••••" required>
+      </div>
+      <button type="submit" class="btn btn-primary" id="authSubmitBtn" style="width:100%;margin-top:16px;">Entrar ⚡</button>
+    </form>
+    
+    <div style="text-align:center;margin-top:24px;">
+      <a href="#" id="authToggleMode" style="color:var(--text-muted);font-size:0.85rem;text-decoration:none;">
+        Não tem uma conta? <span style="color:var(--neon-green)">Registre-se grátis</span>
+      </a>
+    </div>
+  </div>
+</div>
+
+<div class="app-container" id="app-container" style="display:none;">
+
+  <!-- ====== SIDEBAR ====== -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-logo">Binary Ops</div>
+      <div class="sidebar-subtitle">Trading Dashboard</div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <div class="nav-section-title">Principal</div>
+      <a class="nav-item active" data-page="bot">
+        <span class="nav-icon">🤖</span> Robô
+      </a>
+      <a class="nav-item" data-page="cataloger">
+        <span class="nav-icon">🔍</span> Catalogador
+      </a>
+
+      <div class="nav-section-title">Sistema</div>
+      <a class="nav-item" id="btnLogout" style="color: var(--neon-red); margin-top: 20px;">
+        <span class="nav-icon">🚪</span> Sair
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="bank-info">
+        <div class="bank-label" id="navUserName">Usuário</div>
+      </div>
+      <div class="bank-info" style="margin-top: 10px;">
+        <div class="bank-label">Saldo da Banca</div>
+        <div class="bank-value" id="sidebarBank">R$ 0.00</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ====== MAIN CONTENT ====== -->
+  <main class="main-content">
+
+    <!-- Header -->
+    <div class="page-header">
+      <h1 class="page-title" id="pageTitle">🤖 <span>Robô de Automação</span></h1>
+    </div>
+
+    <!-- ==================== ROBOT PAGE ==================== -->
+    <section id="page-bot" class="page-section active">
+      <div class="bot-grid">
+        
+        <!-- Coluna de Configuração -->
+        <div class="bot-panel-card">
+          <div class="connection-panel">
+            <div class="connection-status">
+              <span class="status-dot disconnected" id="botStatusDot"></span>
+              <span id="botStatusText">Robô Inativo</span>
+            </div>
+            <div class="switch-container">
+              <span class="form-label" style="margin: 0; font-size: 0.8rem;">Automação</span>
+              <label class="neon-switch">
+                <input type="checkbox" id="botToggle">
+                <span class="neon-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <form id="botConfigForm">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Corretora Ativa</label>
+                <select class="form-select" id="botBroker" required>
+                  <option value="exnova">Exnova</option>
+                  <option value="iqoption">IQ Option</option>
+                  <option value="bullex">Bullex</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Tipo de Conta</label>
+                <select class="form-select" id="botAccountType" required>
+                  <option value="demo">Demo / Treinamento</option>
+                  <option value="real">Real / Dinheiro Real</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row-3">
+              <div class="form-group">
+                <label class="form-label">Entrada</label>
+                <input type="number" class="form-input" id="botEntryAmount" step="0.5" min="2" value="10">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Stop Win (Lucro)</label>
+                <input type="number" class="form-input" id="botStopWin" min="0" step="1" value="50">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Stop Loss (Prejuízo)</label>
+                <input type="number" class="form-input" id="botStopLoss" min="0" step="1" value="50">
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Payout Mín (%)</label>
+                <input type="number" class="form-input" id="botMinPayout" min="10" max="100" value="80">
+              </div>
+              <div class="form-group">
+                <label class="form-label" style="display:block; margin-bottom:10px;">Sistemas de Gestão (Combináveis)</label>
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                  <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--text-primary); font-size:0.85rem;">
+                    <input type="checkbox" id="botUseMartingale" checked style="accent-color:var(--neon-cyan); transform:scale(1.2);"> Ativar Martingale (Recuperação no Loss)
+                  </label>
+                  <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--text-primary); font-size:0.85rem;">
+                    <input type="checkbox" id="botUseSoros" style="accent-color:var(--neon-cyan); transform:scale(1.2);"> Ativar Soros (Alavancagem no Win)
+                  </label>
+                  <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--text-primary); font-size:0.85rem;">
+                    <input type="checkbox" id="botUseCycles" style="accent-color:var(--neon-cyan); transform:scale(1.2);"> Ativar Ciclos (Tabela de Mãos)
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Bloco de Configuração de Martingale -->
+            <div class="form-row" id="mgmtMartingaleSettings">
+              <div class="form-group">
+                <label class="form-label">Martingale (Nível)</label>
+                <select class="form-select" id="botMartingales">
+                  <option value="0">Sem Gale (Mão Leve)</option>
+                  <option value="1" selected>1 Martingale</option>
+                  <option value="2">2 Martingales</option>
+                  <option value="3">3 Martingales</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Fator Gale</label>
+                <input type="number" class="form-input" id="botGaleFactor" step="0.1" min="1" value="2.0">
+              </div>
+            </div>
+
+            <!-- Bloco de Configuração de Soros (para Soros e SorosGale) -->
+            <div class="form-group" id="mgmtSorosSettings" style="display:none;">
+              <label class="form-label">Soros (Nível Máximo)</label>
+              <select class="form-select" id="botSorosLevel">
+                <option value="0">Desativado</option>
+                <option value="1" selected>Nível 1</option>
+                <option value="2">Nível 2</option>
+                <option value="3">Nível 3</option>
+              </select>
+            </div>
+
+            <!-- Bloco de Configuração de Ciclos -->
+            <div class="form-group" id="mgmtCyclesSettings" style="display:none; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; background: rgba(0,0,0,0.1); margin-bottom: 15px;">
+              <label class="form-label" style="color:var(--neon-green)">Tabela de Ciclos (Mãos)</label>
+              <p style="font-size: 0.7rem; color: var(--text-muted); margin-bottom: 5px;">Formato: C1: mão1, mão2 | C2: mão1, mão2... (cada ciclo na sua linha)</p>
+              <textarea class="form-textarea" id="botCyclesConfig" rows="3" placeholder="C1: 10, 20
+C2: 15, 30
+C3: 25, 55"></textarea>
+            </div>
+
+
+            <div class="form-group">
+              <label class="form-label">Estratégia Principal</label>
+              <select class="form-select" id="botStrategy" required>
+                <option value="signals_list">Lista de Sinais Manual</option>
+                <option value="auto_pattern">Catalogador Dinâmico (Padrão de Cores)</option>
+                <option value="price_action">Price Action Avançado (Retração/S&R)</option>
+              </select>
+            </div>
+
+            <div class="form-group" id="botSignalsListGroup">
+              <label class="form-label">Lista de Sinais (Formato: HH:MM;PAR;DIREÇÃO;EXPIRAÇÃO)</label>
+              <textarea class="form-textarea" id="botSignalsList" rows="6" placeholder="Exemplo:
+12:30;EUR/USD;CALL;M1
+12:45;GBP/USD;PUT;M1
+13:00;USD/JPY;CALL;M5"></textarea>
+              <div id="botParsedSignals" style="margin-top:8px; font-size:0.8rem; color:var(--neon-green); font-weight:bold; background: rgba(0,255,100,0.1); padding: 5px; border-radius: 4px;">
+                Status: Aguardando robô ligar para ler a lista...
+              </div>
+            </div>
+
+            <div class="form-group" id="botPatternsListGroup" style="display:none;">
+              <label class="form-label" style="color:var(--neon-cyan)">Lista de Padrões (Formato: PADRÃO;PAR;DIREÇÃO;EXPIRAÇÃO)</label>
+              <textarea class="form-textarea" id="botPatternsList" rows="6" placeholder="Exemplo:
+🟩🟥;EUR/USD;CALL;15M
+🟥🟥🟩;GBP/JPY;PUT;5M"></textarea>
+              <div id="botParsedPatterns" style="margin-top:8px; font-size:0.8rem; color:var(--neon-cyan); font-weight:bold; background: rgba(0,255,255,0.1); padding: 5px; border-radius: 4px;">
+                Status: Aguardando robô ler a lista de padrões...
+              </div>
+            </div>
+
+            <div class="form-group" id="botCustomPatternGroup" style="display:none; text-align:center; margin-top:10px; border: 1px solid var(--border-color); border-radius:8px; padding: 10px;">
+              <label class="form-label" style="color:var(--neon-green)">Construtor de Padrão (Velas M1)</label>
+              <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px;">Defina a sequência de cores das últimas 3 velas fechadas para o robô abrir a operação na próxima vela.</p>
+              
+              <div style="display:flex; gap:5px; margin-bottom:10px;">
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:0.7rem;">Vela -3</label>
+                  <select class="form-select" id="customCandle1" style="padding: 4px;">
+                    <option value="ANY">Qualquer</option>
+                    <option value="G">Verde</option>
+                    <option value="R">Vermelha</option>
+                  </select>
+                </div>
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:0.7rem;">Vela -2</label>
+                  <select class="form-select" id="customCandle2" style="padding: 4px;">
+                    <option value="ANY">Qualquer</option>
+                    <option value="G">Verde</option>
+                    <option value="R">Vermelha</option>
+                  </select>
+                </div>
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:0.7rem;">Vela -1 (Última)</label>
+                  <select class="form-select" id="customCandle3" style="padding: 4px;">
+                    <option value="ANY">Qualquer</option>
+                    <option value="G">Verde</option>
+                    <option value="R">Vermelha</option>
+                  </select>
+                </div>
+              </div>
+              
+              <label class="form-label">Ação na próxima vela:</label>
+              <select class="form-select" id="customAction">
+                <option value="CALL">▲ CALL (ACIMA)</option>
+                <option value="PUT">▼ PUT (ABAIXO)</option>
+              </select>
+            </div>
+
+            <div class="form-group" id="botPriceActionGroup" style="display:none; text-align:center; margin-top:10px; border: 1px solid var(--border-color); border-radius:8px; padding: 10px;">
+              <label class="form-label" style="color:var(--neon-purple)">Motor de Price Action (Tick by Tick)</label>
+              <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px;">Opera retração na MESMA vela tocando em suportes e resistências históricos (Fractais).</p>
+              
+              <div style="display:flex; gap:10px; margin-bottom:10px;">
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:0.75rem;">Timeframe do Gráfico</label>
+                  <select class="form-select" id="paTimeframe">
+                    <option value="5m">M5 (5 Minutos)</option>
+                    <option value="15m">M15 (15 Minutos)</option>
+                  </select>
+                </div>
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:0.75rem;">Modo Operacional</label>
+                  <select class="form-select" id="paMode">
+                    <option value="retraction">Retração no Toque (Suporte/Resistência)</option>
+                    <option value="false_breakout">Falso Rompimento (Rejeição de Pavio)</option>
+                  </select>
+                </div>
+              </div>
+              
+              <div style="display:flex; gap:10px; margin-bottom:5px;">
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:0.75rem;">Tempo Máximo para Toque (Minutos)</label>
+                  <input type="number" class="form-input" id="paTimeFilter" step="0.5" min="0.5" max="14" value="3.0" placeholder="Ex: 3.0 para M5">
+                  <span style="font-size:0.6rem; color:var(--text-muted)">Bloqueia entrada se tocar no final da vela.</span>
+                </div>
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:0.75rem;">Sensibilidade (Fractal S/R)</label>
+                  <select class="form-select" id="paSensitivity">
+                    <option value="3">Alta (Fractal 3 velas)</option>
+                    <option value="5" selected>Média (Fractal 5 velas)</option>
+                    <option value="7">Baixa (Fractal 7 velas fortes)</option>
+                  </select>
+                </div>
+              </div>
+
+              <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 15px 0;">
+              <label class="form-label" style="color:var(--neon-cyan)">Filtros Avançados de Validação</label>
+              
+              <div style="display:flex; gap:10px; margin-bottom:5px;">
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:0.75rem;">Filtro de Tendência</label>
+                  <select class="form-select" id="paTrendFilter">
+                    <option value="none">Desativado (Opera todas)</option>
+                    <option value="sma20">A favor da Tendência Curta (SMA 20)</option>
+                    <option value="sma50">A favor da Tendência Longa (SMA 50)</option>
+                  </select>
+                </div>
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:0.75rem;">Esticamento da Vela</label>
+                  <select class="form-select" id="paDistanceFilter">
+                    <option value="none">Desativado (Pico ou Nascida na Zona)</option>
+                    <option value="stretch">Exigir Esticamento (Evitar nascida na linha)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group" id="botManualButtonsGroup" style="display:none; text-align:center; margin-top:10px;">
+              <label class="form-label">Disparador Manual de Sinais</label>
+              <select class="form-select" id="botManualPair" style="margin-top: 8px;">
+                <!-- Pares Reais -->
+                <option value="EUR/USD">EUR/USD</option>
+                <option value="GBP/USD">GBP/USD</option>
+                <option value="USD/JPY">USD/JPY</option>
+                <option value="AUD/USD">AUD/USD</option>
+                <option value="USD/CAD">USD/CAD</option>
+                <option value="NZD/USD">NZD/USD</option>
+                <option value="USD/CHF">USD/CHF</option>
+                <option value="EUR/GBP">EUR/GBP</option>
+                <option value="EUR/JPY">EUR/JPY</option>
+                <option value="GBP/JPY">GBP/JPY</option>
+                <option value="AUD/CAD">AUD/CAD</option>
+                <option value="EUR/CHF">EUR/CHF</option>
+                <option value="EUR/CAD">EUR/CAD</option>
+                <option value="EUR/AUD">EUR/AUD</option>
+                <option value="GBP/CHF">GBP/CHF</option>
+                <option value="GBP/CAD">GBP/CAD</option>
+                <option value="GBP/AUD">GBP/AUD</option>
+                <option value="AUD/CHF">AUD/CHF</option>
+                <option value="AUD/JPY">AUD/JPY</option>
+                <option value="NZD/JPY">NZD/JPY</option>
+                <option value="CAD/JPY">CAD/JPY</option>
+                <option value="CHF/JPY">CHF/JPY</option>
+                <option value="CAD/CHF">CAD/CHF</option>
+                <!-- Pares OTC -->
+                <option value="EUR/USD-OTC">EUR/USD (OTC)</option>
+                <option value="GBP/USD-OTC">GBP/USD (OTC)</option>
+                <option value="USD/JPY-OTC">USD/JPY (OTC)</option>
+                <option value="AUD/USD-OTC">AUD/USD (OTC)</option>
+                <option value="USD/CAD-OTC">USD/CAD (OTC)</option>
+                <option value="NZD/USD-OTC">NZD/USD (OTC)</option>
+                <option value="USD/CHF-OTC">USD/CHF (OTC)</option>
+                <option value="EUR/GBP-OTC">EUR/GBP (OTC)</option>
+                <option value="EUR/JPY-OTC">EUR/JPY (OTC)</option>
+                <option value="GBP/JPY-OTC">GBP/JPY (OTC)</option>
+                <option value="AUD/CAD-OTC">AUD/CAD (OTC)</option>
+                <option value="EUR/CHF-OTC">EUR/CHF (OTC)</option>
+                <option value="EUR/CAD-OTC">EUR/CAD (OTC)</option>
+                <option value="EUR/AUD-OTC">EUR/AUD (OTC)</option>
+                <option value="GBP/CHF-OTC">GBP/CHF (OTC)</option>
+                <option value="GBP/CAD-OTC">GBP/CAD (OTC)</option>
+                <option value="GBP/AUD-OTC">GBP/AUD (OTC)</option>
+                <option value="AUD/CHF-OTC">AUD/CHF (OTC)</option>
+                <option value="AUD/JPY-OTC">AUD/JPY (OTC)</option>
+                <option value="NZD/JPY-OTC">NZD/JPY (OTC)</option>
+                <option value="CAD/JPY-OTC">CAD/JPY (OTC)</option>
+                <option value="CHF/JPY-OTC">CHF/JPY (OTC)</option>
+                <option value="CAD/CHF-OTC">CAD/CHF (OTC)</option>
+              </select>
+              <div style="display:flex; gap:10px; margin-top:8px;">
+                <button type="button" class="btn btn-success" id="btnManualCall" style="flex:1;">▲ ACIMA</button>
+                <button type="button" class="btn btn-danger" id="btnManualPut" style="flex:1;">▼ ABAIXO</button>
+              </div>
+            </div>
+
+            <!-- Calibragem por Coordenadas (Sempre Visível) -->
+            <div style="margin-top: 20px; padding: 10px; border: 1px dashed var(--border-color); border-radius: 8px;">
+              <label class="form-label" style="color: var(--neon-cyan);">Calibragem por Coordenadas (Web Canvas)</label>
+              <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px;">Clique abaixo, vá para a corretora e clique no botão correspondente para o robô memorizar a tela.</p>
+              <div style="display:flex; gap:10px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-outline" id="btnCalibrateCall" style="flex:1;">🎯 Calibrar ACIMA</button>
+                <button type="button" class="btn btn-outline" id="btnCalibratePut" style="flex:1;">🎯 Calibrar ABAIXO</button>
+                <button type="button" class="btn btn-outline" id="btnCalibrateAmount" style="flex:1; min-width: 100%; margin-top: 5px;">🎯 Calibrar CAMPO DE VALOR</button>
+              </div>
+            </div>
+
+            <!-- Filtro de Notícias Econômicas -->
+            <div style="margin-top: 20px; margin-bottom: 15px; padding: 12px; border: 1px dashed rgba(255, 60, 100, 0.3); border-radius: 8px; background: rgba(255, 60, 100, 0.02);">
+              <label class="form-label" style="color: var(--neon-red); font-weight: bold; display: flex; align-items: center; gap: 5px; margin: 0 0 8px 0;">
+                🚨 Filtro de Notícias Econômicas (Anti-Loss)
+              </label>
+              
+              <div style="display:flex; gap:15px; margin-bottom:10px;">
+                <label style="display:flex; align-items:center; gap:5px; font-size:0.75rem; color:var(--text-secondary); cursor:pointer;">
+                  <input type="checkbox" id="botNewsFilter3" checked> Evitar 3 Touros (High)
+                </label>
+                <label style="display:flex; align-items:center; gap:5px; font-size:0.75rem; color:var(--text-secondary); cursor:pointer;">
+                  <input type="checkbox" id="botNewsFilter2"> Evitar 2 Touros (Medium)
+                </label>
+              </div>
+
+              <div style="display:flex; gap:10px; margin-bottom:12px;">
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:0.7rem; margin-bottom:4px;">Minutos Antes</label>
+                  <input type="number" class="form-input" id="botNewsMinBefore" min="1" max="60" value="15" style="padding: 4px 8px; font-size:0.8rem; height:32px;">
+                </div>
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:0.7rem; margin-bottom:4px;">Minutos Depois</label>
+                  <input type="number" class="form-input" id="botNewsMinAfter" min="1" max="60" value="15" style="padding: 4px 8px; font-size:0.8rem; height:32px;">
+                </div>
+              </div>
+
+              <!-- Tabela de Notícias do Dia -->
+              <div style="margin-top:10px; border-top: 1px solid rgba(255, 255, 255, 0.05); padding-top: 8px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+                  <label class="form-label" style="font-size:0.75rem; margin:0;">Eventos do Dia</label>
+                  <span id="btnSyncCalendar" style="color:var(--neon-cyan); cursor:pointer; font-size:0.7rem; font-weight:bold; text-decoration:underline;">🔄 Sincronizar</span>
+                </div>
+                <div id="botNewsTableContainer" style="max-height: 100px; overflow-y: auto; font-size:0.7rem; color:var(--text-muted); background: rgba(0,0,0,0.2); border-radius: 4px; padding: 6px; border:1px solid rgba(255,255,255,0.03);">
+                  Carregando notícias do dia...
+                </div>
+              </div>
+            </div>
+
+            <!-- Opções de Ciclo de Padrão -->
+            <div style="margin-top: 10px; margin-bottom: 15px; padding: 12px; border: 1px dashed rgba(6, 252, 226, 0.3); border-radius: 8px; background: rgba(6, 252, 226, 0.02);">
+              <label style="display:flex; align-items:center; gap:8px; font-size:0.75rem; color:var(--text-primary); cursor:pointer; font-weight:bold;">
+                <input type="checkbox" id="botWaitCycleBreak" checked> 🔁 Aguardar Quebra de Ciclo (Exaustão/Fluxo)
+              </label>
+              <p style="font-size:0.65rem; color:var(--text-muted); margin-top:4px; margin-bottom:0; line-height:1.3;">
+                Evita reentradas imediatas em sequências longas de velas da mesma cor. O robô aguardará que a sequência seja quebrada por uma vela de cor oposta antes de buscar o padrão novamente.
+              </p>
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="width:100%; margin-top:10px;">💾 Salvar Configurações do Robô</button>
+          </form>
+        </div>
+
+        <!-- Coluna de Logs -->
+        <div class="bot-console-card">
+          <div class="terminal-header">
+            <span>💻 CONSOLE DO ROBÔ</span>
+            <div class="terminal-controls">
+              <span class="terminal-dot red"></span>
+              <span class="terminal-dot yellow"></span>
+              <span class="terminal-dot green"></span>
+            </div>
+          </div>
+          <div class="terminal-wrapper">
+            <div class="terminal-logs" id="botConsoleLogs">
+              <div class="log-entry">
+                <span class="log-time">[10:00:00]</span>
+                <span class="log-text log-info">Robô de Automação inicializado. Aguardando conexão...</span>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+            <button class="btn btn-outline btn-sm" id="btnClearConsole">🗑️ Limpar Console</button>
+            <span class="text-muted" style="font-size:0.75rem;" id="botActiveConnections">0 corretora(s) detectada(s)</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ==================== CATALOGER PAGE ==================== -->
+    <section id="page-cataloger" class="page-section">
+      <div class="metrics-grid" style="grid-template-columns: 1fr; margin-bottom: 20px;">
+        <div class="metric-card" style="background: var(--surface-light); border: 1px solid var(--border-color);">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 15px;">
+            <div>
+              <h2 style="font-size: 1.2rem; margin-bottom: 5px; color: var(--neon-cyan);">Catalogador Probabilístico</h2>
+              <p style="font-size: 0.85rem; color: var(--text-muted);">Mapeie o mercado passado para prever o futuro com precisão.</p>
+            </div>
+            <span class="status-dot connected" id="catalogerStatus"></span>
+          </div>
+          
+          <form id="catalogerForm" style="display: flex; gap: 15px; flex-wrap: wrap; align-items: flex-end;">
+            <div class="form-group" style="flex: 1; min-width: 150px;">
+              <label class="form-label">Ativo (Real / OTC)</label>
+              <select class="form-select" id="catPair" required>
+                <!-- Pares Reais -->
+                <option value="EUR/USD">EUR/USD</option>
+                <option value="GBP/USD">GBP/USD</option>
+                <option value="USD/JPY">USD/JPY</option>
+                <option value="AUD/USD">AUD/USD</option>
+                <option value="USD/CAD">USD/CAD</option>
+                <option value="NZD/USD">NZD/USD</option>
+                <option value="USD/CHF">USD/CHF</option>
+                <option value="EUR/GBP">EUR/GBP</option>
+                <option value="EUR/JPY">EUR/JPY</option>
+                <option value="GBP/JPY">GBP/JPY</option>
+                <option value="AUD/CAD">AUD/CAD</option>
+                <option value="EUR/CHF">EUR/CHF</option>
+                <option value="EUR/CAD">EUR/CAD</option>
+                <option value="EUR/AUD">EUR/AUD</option>
+                <option value="GBP/CHF">GBP/CHF</option>
+                <option value="GBP/CAD">GBP/CAD</option>
+                <option value="GBP/AUD">GBP/AUD</option>
+                <option value="AUD/CHF">AUD/CHF</option>
+                <option value="AUD/JPY">AUD/JPY</option>
+                <option value="NZD/JPY">NZD/JPY</option>
+                <option value="CAD/JPY">CAD/JPY</option>
+                <option value="CHF/JPY">CHF/JPY</option>
+                <option value="CAD/CHF">CAD/CHF</option>
+                <!-- Pares OTC -->
+                <option value="EUR/USD-OTC">EUR/USD (OTC)</option>
+                <option value="GBP/USD-OTC">GBP/USD (OTC)</option>
+                <option value="USD/JPY-OTC">USD/JPY (OTC)</option>
+                <option value="AUD/USD-OTC">AUD/USD (OTC)</option>
+                <option value="USD/CAD-OTC">USD/CAD (OTC)</option>
+                <option value="NZD/USD-OTC">NZD/USD (OTC)</option>
+                <option value="USD/CHF-OTC">USD/CHF (OTC)</option>
+                <option value="EUR/GBP-OTC">EUR/GBP (OTC)</option>
+                <option value="EUR/JPY-OTC">EUR/JPY (OTC)</option>
+                <option value="GBP/JPY-OTC">GBP/JPY (OTC)</option>
+                <option value="AUD/CAD-OTC">AUD/CAD (OTC)</option>
+                <option value="EUR/CHF-OTC">EUR/CHF (OTC)</option>
+                <option value="EUR/CAD-OTC">EUR/CAD (OTC)</option>
+                <option value="EUR/AUD-OTC">EUR/AUD (OTC)</option>
+                <option value="GBP/CHF-OTC">GBP/CHF (OTC)</option>
+                <option value="GBP/CAD-OTC">GBP/CAD (OTC)</option>
+                <option value="GBP/AUD-OTC">GBP/AUD (OTC)</option>
+                <option value="AUD/CHF-OTC">AUD/CHF (OTC)</option>
+                <option value="AUD/JPY-OTC">AUD/JPY (OTC)</option>
+                <option value="NZD/JPY-OTC">NZD/JPY (OTC)</option>
+                <option value="CAD/JPY-OTC">CAD/JPY (OTC)</option>
+                <option value="CHF/JPY-OTC">CHF/JPY (OTC)</option>
+                <option value="CAD/CHF-OTC">CAD/CHF (OTC)</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex: 1; min-width: 150px;">
+              <label class="form-label">Timeframe</label>
+              <select class="form-select" id="catTimeframe" required>
+                <option value="1m">M1 (1 Minuto)</option>
+                <option value="5m">M5 (5 Minutos)</option>
+                <option value="15m">M15 (15 Minutos)</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex: 1; min-width: 150px;">
+              <label class="form-label">Velas a Analisar</label>
+              <input type="number" class="form-input" id="catCandleLimit" value="300" min="50" max="2000" step="50" required>
+            </div>
+            <div style="width: 100%; display: flex; gap: 15px; flex-wrap: wrap;">
+              <div class="form-group" style="flex: 1; min-width: 200px;">
+                <label class="form-label">Modo de Análise</label>
+                <select class="form-select" id="catMode" required>
+                  <option value="time">Minuto da Hora (Sinais Programados)</option>
+                  <option value="pattern">Padrão de Cores (Combinações Mistas)</option>
+                  <option value="exhaustion">Exaustão de Velas (Estratégia de Reversão - Contra a cor)</option>
+                  <option value="continuity">Fluxo de Velas (Estratégia de Continuidade - Mesma cor)</option>
+                </select>
+              </div>
+              <div class="form-group" id="catPatternSettings" style="flex: 1; min-width: 200px; display: none;">
+                <label class="form-label">Tamanho do Padrão</label>
+                <select class="form-select" id="catPatternSize">
+                  <option value="2">2 Velas</option>
+                  <option value="3" selected>3 Velas</option>
+                  <option value="4">4 Velas</option>
+                  <option value="5">5 Velas</option>
+                  <option value="6">6 Velas</option>
+                  <option value="7">7 Velas</option>
+                  <option value="8">8 Velas</option>
+                </select>
+              </div>
+              <div class="form-group" style="flex: 1; min-width: 150px;">
+                <label class="form-label">Win Rate Mínimo (%)</label>
+                <input type="number" class="form-input" id="catMinWinRate" value="60" min="0" max="100" step="1" required>
+              </div>
+            </div>
+            
+            <div style="flex: 1; min-width: 100%; margin-top: 10px;">
+              <button type="submit" class="btn btn-primary" id="btnRunCataloger" style="width: 100%; height: 42px;">🔍 Iniciar Catalogação</button>
+            </div>
+          </form>
+          
+          <!-- Recommendation / Validade Card -->
+          <div id="catRecommendationBox" style="margin-top: 20px; padding: 15px; background: rgba(6, 252, 226, 0.03); border: 1px dashed rgba(6, 252, 226, 0.2); border-radius: var(--radius-md); display: flex; gap: 15px; align-items: center;">
+            <div style="font-size: 1.8rem; color: var(--neon-cyan); text-shadow: 0 0 10px rgba(6, 252, 226, 0.4)">💡</div>
+            <div>
+              <h4 style="font-size: 0.85rem; font-weight: 700; color: var(--text-primary); margin-bottom: 3px;">Regra de Validade e Ciclo Probabilístico</h4>
+              <p id="catRecommendationText" style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">
+                Selecione um timeframe para ver a recomendação de tempo de uso para esta catalogação.
+              </p>
+            </div>
+          </div>
+
+          <!-- Seção de Resultados Dinâmicos -->
+          <div class="table-container" style="display: none; margin-top: 20px; border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: var(--spacing-md); background: rgba(0, 0, 0, 0.15);" id="catalogerResultsContainer">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px; padding: 0 10px;">
+              <h3 style="font-size: 1.1rem; color: var(--neon-cyan)" id="catalogerResultsTitle">Melhores Padrões Encontrados</h3>
+              <button class="btn btn-success btn-sm" id="btnExportSignals">📥 Enviar para Robô</button>
+            </div>
+            <table class="data-table" id="catalogerTable">
+              <thead>
+                <tr>
+                  <th>Padrão / Horário</th>
+                  <th>Entrada</th>
+                  <th>Timeframe</th>
+                  <th>Win Rate (%)</th>
+                  <th>Volume (Amostras)</th>
+                  <th style="text-align:right;">Simulação</th>
+                </tr>
+              </thead>
+              <tbody id="catalogerTableBody">
+                <!-- Dinâmico -->
+              </tbody>
+            </table>
+          </div>
+          
+          <!-- Card de Padrões Analisados pelo Robô -->
+          <div class="card" style="margin-top: 20px; background: var(--surface-light); border: 1px solid var(--border-color); padding: var(--spacing-md);">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+              <span style="font-size: 1.2rem; color: var(--neon-cyan)">📊</span>
+              <h3 style="font-size: 0.9rem; font-weight: 700; color: var(--text-primary);">Dicionário de Padrões de Cores Analisados (Tamanho 3)</h3>
+            </div>
+            <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 15px; line-height: 1.4;">
+              O catalogador varre as últimas 1000 velas e mapeia a taxa de acerto de <strong>todas as 8 combinações de cores possíveis</strong> para prever se a próxima vela (Vela de Entrada) fechará como <span style="color: var(--neon-green)">Verde (CALL)</span> ou <span style="color: var(--neon-red)">Vermelha (PUT)</span>.
+            </p>
+            <div class="table-container" style="max-height: 250px; overflow-y: auto;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Padrão</th>
+                    <th>Vela -3</th>
+                    <th>Vela -2</th>
+                    <th>Vela -1 (Última)</th>
+                    <th>Decisão (Vela Entrada)</th>
+                    <th>Estratégia Probabilística</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>GGG</strong></td>
+                    <td><span style="color: var(--neon-green)">🟩 Verde</span></td>
+                    <td><span style="color: var(--neon-green)">🟩 Verde</span></td>
+                    <td><span style="color: var(--neon-green)">🟩 Verde</span></td>
+                    <td>CALL (Se Verde) ou PUT (Se Vermelha)</td>
+                    <td>Ciclo / Fluxo / Exaustão</td>
+                  </tr>
+                  <tr>
+                    <td><strong>GGR</strong></td>
+                    <td><span style="color: var(--neon-green)">🟩 Verde</span></td>
+                    <td><span style="color: var(--neon-green)">🟩 Verde</span></td>
+                    <td><span style="color: var(--neon-red)">🟥 Vermelha</span></td>
+                    <td>CALL (Se Verde) ou PUT (Se Vermelha)</td>
+                    <td>Probabilidade / Reversão rápida</td>
+                  </tr>
+                  <tr>
+                    <td><strong>GRG</strong></td>
+                    <td><span style="color: var(--neon-green)">🟩 Verde</span></td>
+                    <td><span style="color: var(--neon-red)">🟥 Vermelha</span></td>
+                    <td><span style="color: var(--neon-green)">🟩 Verde</span></td>
+                    <td>CALL (Se Verde) ou PUT (Se Vermelha)</td>
+                    <td>Probabilidade / Alternação</td>
+                  </tr>
+                  <tr>
+                    <td><strong>GRR</strong></td>
+                    <td><span style="color: var(--neon-green)">🟩 Verde</span></td>
+                    <td><span style="color: var(--neon-red)">🟥 Vermelha</span></td>
+                    <td><span style="color: var(--neon-red)">🟥 Vermelha</span></td>
+                    <td>CALL (Se Verde) ou PUT (Se Vermelha)</td>
+                    <td>Probabilidade / Continuidade</td>
+                  </tr>
+                  <tr>
+                    <td><strong>RGG</strong></td>
+                    <td><span style="color: var(--neon-red)">🟥 Vermelha</span></td>
+                    <td><span style="color: var(--neon-green)">🟩 Verde</span></td>
+                    <td><span style="color: var(--neon-green)">🟩 Verde</span></td>
+                    <td>CALL (Se Verde) ou PUT (Se Vermelha)</td>
+                    <td>Probabilidade / Continuidade</td>
+                  </tr>
+                  <tr>
+                    <td><strong>RGR</strong></td>
+                    <td><span style="color: var(--neon-red)">🟥 Vermelha</span></td>
+                    <td><span style="color: var(--neon-green)">🟩 Verde</span></td>
+                    <td><span style="color: var(--neon-red)">🟥 Vermelha</span></td>
+                    <td>CALL (Se Verde) ou PUT (Se Vermelha)</td>
+                    <td>Probabilidade / Alternação</td>
+                  </tr>
+                  <tr>
+                    <td><strong>RRG</strong></td>
+                    <td><span style="color: var(--neon-red)">🟥 Vermelha</span></td>
+                    <td><span style="color: var(--neon-red)">🟥 Vermelha</span></td>
+                    <td><span style="color: var(--neon-green)">🟩 Verde</span></td>
+                    <td>CALL (Se Verde) ou PUT (Se Vermelha)</td>
+                    <td>Probabilidade / Reversão rápida</td>
+                  </tr>
+                  <tr>
+                    <td><strong>RRR</strong></td>
+                    <td><span style="color: var(--neon-red)">🟥 Vermelha</span></td>
+                    <td><span style="color: var(--neon-red)">🟥 Vermelha</span></td>
+                    <td><span style="color: var(--neon-red)">🟥 Vermelha</span></td>
+                    <td>CALL (Se Verde) ou PUT (Se Vermelha)</td>
+                    <td>Ciclo / Fluxo / Exaustão</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+</div>
+
+<!-- ====== BACKTEST MODAL ====== -->
+<div class="modal-overlay" id="backtestModal">
+  <div class="modal" style="max-width: 900px; width: 95%;">
+    <div class="modal-header">
+      <h2 class="modal-title" id="backtestModalTitle">📊 Simulador e Backtesting de Padrão</h2>
+      <button class="modal-close" onclick="UI.closeModal('backtestModal')">&times;</button>
+    </div>
+    <div class="modal-body" style="display:flex; gap:20px; flex-wrap:wrap; padding: 15px;">
+      <!-- Coluna da Esquerda: Gráfico -->
+      <div style="flex:2; min-width:300px;">
+        <div style="background: rgba(0,0,0,0.25); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); box-shadow: inset 0 0 10px rgba(0,0,0,0.5);">
+          <canvas id="backtestChart" style="width:100%; height:320px;"></canvas>
+        </div>
+      </div>
+      
+      <!-- Coluna da Direita: Estatísticas e Parâmetros -->
+      <div style="flex:1; min-width:250px; display:flex; flex-direction:column; gap:15px;">
+        <!-- Card de Parâmetros -->
+        <div style="background: var(--surface-light); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
+          <h4 style="color:var(--neon-cyan); margin-top:0; margin-bottom:12px; font-size:0.85rem; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:5px;">Parâmetros de Simulação</h4>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:0.75rem; color:var(--text-secondary)">Banca Inicial:</span>
+              <input type="number" id="bkStartBank" value="100" min="10" max="10000" style="width:80px; font-size:0.75rem; padding:4px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:0.75rem; color:var(--text-secondary)">Payout (%):</span>
+              <input type="number" id="bkPayout" value="80" min="20" max="100" style="width:80px; font-size:0.75rem; padding:4px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:0.75rem; color:var(--text-secondary)">Valor Entrada:</span>
+              <input type="number" id="bkAmount" value="10" min="2" style="width:80px; font-size:0.75rem; padding:4px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:0.75rem; color:var(--text-secondary)">Gerenciamento:</span>
+              <select id="bkMgmtType" style="width:100px; font-size:0.75rem; padding:4px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
+                <option value="none">Mão Fixa</option>
+                <option value="martingale" selected>Martingale</option>
+                <option value="soros">Soros</option>
+              </select>
+            </div>
+            <div id="bkMgmtSettingsContainer" style="display:flex; flex-direction:column; gap:8px;">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:0.75rem; color:var(--text-secondary)">Limite Gales:</span>
+                <input type="number" id="bkMartingales" value="1" min="0" max="3" style="width:80px; font-size:0.75rem; padding:4px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:0.75rem; color:var(--text-secondary)">Fator Multiplicar:</span>
+                <input type="number" id="bkGaleFactor" value="2.0" step="0.1" style="width:80px; font-size:0.75rem; padding:4px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-primary); border-radius:4px;">
+              </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:5px; margin-top:8px; border-top: 1px solid rgba(255,255,255,0.05); padding-top:8px;">
+              <label style="display:flex; align-items:center; gap:6px; font-size:0.7rem; color:var(--text-secondary); cursor:pointer;">
+                <input type="checkbox" id="bkWaitCycleBreak" checked> Quebra de Ciclo (Exaustão/Fluxo)
+              </label>
+            </div>
+          </div>
+          <button id="btnRunBacktest" class="btn btn-primary btn-sm" style="width:100%; margin-top:12px; font-size:0.75rem; height:32px;">⚡ Rodar Simulação</button>
+        </div>
+        
+        <!-- Card de Estatísticas -->
+        <div style="background: var(--surface-light); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; display:flex; flex-direction:column; gap:8px;">
+          <h4 style="color:var(--neon-green); font-size:0.85rem; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:5px; margin:0;">Estatísticas Finais</h4>
+          <div style="display:flex; justify-content:space-between; font-size:0.75rem;">
+            <span style="color:var(--text-secondary)">Saldo Final:</span>
+            <span id="bkStatEndBank" style="font-weight:bold; color:var(--neon-green)">$ 100.00</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:0.75rem;">
+            <span style="color:var(--text-secondary)">ROI Acumulado:</span>
+            <span id="bkStatROI" style="font-weight:bold; color:var(--neon-cyan)">0.0%</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:0.75rem;">
+            <span style="color:var(--text-secondary)">Assertividade:</span>
+            <span id="bkStatWinRate" style="font-weight:bold;">0%</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:0.75rem;">
+            <span style="color:var(--text-secondary)">Wins / Losses:</span>
+            <span id="bkStatWinLoss" style="font-weight:bold;">0 W - 0 L</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:0.75rem;">
+            <span style="color:var(--text-secondary)">Máx Drawdown:</span>
+            <span id="bkStatDrawdown" style="font-weight:bold; color:var(--neon-red)">0%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabela de Histórico de Operações do Backtest -->
+      <div style="width: 100%; margin-top: 15px; border-top: 1px solid var(--border-color); padding-top: 15px;">
+        <h4 style="color:var(--neon-cyan); margin-top:0; margin-bottom:10px; font-size:0.85rem;">Histórico Detalhado das Operações Simuladas</h4>
+        <div class="table-container" style="max-height: 150px; overflow-y: auto;">
+          <table class="data-table" style="font-size:0.75rem; width: 100%;">
+            <thead>
+              <tr>
+                <th>Data/Hora</th>
+                <th>Padrão</th>
+                <th>Direção</th>
+                <th>Resultado</th>
+                <th>Informação</th>
+                <th>Lucro/Prejuízo</th>
+                <th>Saldo da Banca</th>
+              </tr>
+            </thead>
+            <tbody id="backtestOpsTableBody">
+              <!-- Preenchido dinamicamente pelo JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Scripts -->
+<script src="js/storage.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/metrics.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/bot.js"></script>
+<script src="js/backtester.js"></script>
+<script src="js/cataloger.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
