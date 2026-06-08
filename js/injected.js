@@ -252,7 +252,14 @@
 
     // A expiração precisa ser o timestamp exato do fechamento da vela
     // Arredondar para o próximo múltiplo do timeframe
-    const expTime = (Math.floor(serverTime / expirationSec) + 1) * expirationSec;
+    let expTime = (Math.floor(serverTime / expirationSec) + 1) * expirationSec;
+    
+    // Na IQ Option / Exnova, opções turbo não podem ser compradas faltando menos de 30s para expirar.
+    // O tempo de compra (purchase time) encerra 30s antes do tempo de expiração.
+    if (expTime - serverTime < 30) {
+      expTime += expirationSec;
+      console.log(`[BinaryOps Interceptor] Expiração ajustada para +1 vela pois faltam menos de 30s para o corte.`);
+    }
 
     const dir = direction.toUpperCase() === 'CALL' ? 'call' : 'put';
     const wsRequestId = 'bo_order_' + Math.floor(Math.random() * 1000000);
@@ -294,8 +301,8 @@
       if (!responded) {
         responded = true;
         openWs.removeEventListener('message', responseHandler);
-        // Mesmo com timeout, a ordem pode ter sido aceita
-        window.postMessage({ type: 'binaryops_order_result', requestId, status: 'success', msg: 'Ordem enviada (sem confirmação explícita, mas provavelmente aceita).' }, '*');
+        // Timeout atingido: A corretora ignorou a ordem (Ativo fechado, erro de saldo, etc.)
+        window.postMessage({ type: 'binaryops_order_result', requestId, status: 'error', error: 'Timeout do servidor (Corretora ignorou o envio). Verifique se o ativo permite Opções Turbo, se a aba está logada, ou recarregue (F5).' }, '*');
       }
     }, 8000);
 
@@ -344,6 +351,36 @@
           } else {
             console.log(`[BinaryOps Interceptor] Ordem aceita pela corretora!`, data);
             window.postMessage({ type: 'binaryops_order_result', requestId, status: 'success', data: data.msg || data }, '*');
+          }
+        }
+        // Resposta via broadcast de abertura de opção da corretora
+        if (msgName === 'option' || msgName === 'option-opened' || msgName === 'binary-options.option-opened' || (data.msg && data.msg.name === 'option-opened')) {
+          const optData = data.msg || data;
+          // Validar se o broadcast é da opção que acabamos de mandar (mesmo par e direção)
+          if (String(optData.active_id) === String(activeId) && String(optData.direction) === String(dir)) {
+            if (!responded) {
+              responded = true;
+              clearTimeout(responseTimeout);
+              openWs.removeEventListener('message', responseHandler);
+              console.log(`[BinaryOps Interceptor] Ordem confirmada via "${msgName}" validada por par e direção!`, data);
+              window.postMessage({ type: 'binaryops_order_result', requestId, status: 'success', data: optData }, '*');
+            }
+          }
+        }
+        // Interceptar erros gerais enviados pela corretora MESMO SEM o nosso request_id
+        if (msgName === 'error' || (data.msg && data.msg.message && data.msg.message.toLowerCase().includes("error"))) {
+          if (!responded) {
+            const errMsg = (data.msg && data.msg.message) || data.message || 'A corretora recusou a transação (Motivo genérico ou Par/Timeframe indisponível)';
+            console.error(`[BinaryOps Interceptor] ERRO GLOBAL DA CORRETORA:`, errMsg, data);
+            
+            // Só mandamos o erro pro fallback se tivermos a certeza que foi uma tentativa de operação recente.
+            // Para não cancelar de graça, esperamos o timeout, a não ser que pareça ser relacionado à nossa ordem.
+            if (errMsg.includes("expired") || errMsg.includes("balance") || errMsg.includes("asset")) {
+               responded = true;
+               clearTimeout(responseTimeout);
+               openWs.removeEventListener('message', responseHandler);
+               window.postMessage({ type: 'binaryops_order_result', requestId, status: 'error', error: errMsg }, '*');
+            }
           }
         }
       } catch(e) {}

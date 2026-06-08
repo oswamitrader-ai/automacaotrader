@@ -69,10 +69,7 @@ const Bot = (() => {
     // Iniciar ticker de ping a cada 5 segundos para manter status da corretora atualizado
     setInterval(checkConnectedBrokers, 5000);
 
-    // Sincronizar notícias do calendário econômico
-    fetchEconomicCalendar();
-    // Re-sincronizar notícias a cada 4 horas
-    setInterval(fetchEconomicCalendar, 4 * 60 * 60 * 1000);
+    // Inicialização da parte do calendário foi removida.
   }
 
   // Carregar configurações do LocalStorage
@@ -202,10 +199,7 @@ const Bot = (() => {
       });
     });
 
-    document.getElementById('btnSyncCalendar')?.addEventListener('click', () => {
-      logToConsole("🔄 Sincronizando calendário econômico manualmente...", "info");
-      fetchEconomicCalendar(true);
-    });
+    // Evento de sync de calendário removido.
 
     document.getElementById('btnClearConsole')?.addEventListener('click', () => {
       const consoleLogs = document.getElementById('botConsoleLogs');
@@ -667,12 +661,7 @@ const Bot = (() => {
 
   // Executar Ordem real ou simulada
   function executeTradingOrder(pair, direction, timeframe) {
-    // 1. Checar filtro de notícias (Anti-Loss)
-    const newsStatus = checkNewsFilter(pair);
-    if (newsStatus.block) {
-      logToConsole(`🚨 [Anti-Loss] Entrada bloqueada para ${pair} devido à notícia de impacto ${newsStatus.impactStr} às ${newsStatus.timeStr} (${newsStatus.event.title}).`, 'error');
-      return;
-    }
+    // A checagem de notícias (Anti-loss) foi removida a pedido do usuário.
 
     const amount = Number(Number(state.nextAmount).toFixed(2));
     const cur = Storage.getSettings().currency === 'USD' ? '$' : 'R$';
@@ -751,33 +740,10 @@ const Bot = (() => {
     }
   }
 
-  // Simulador de trading local para desenvolvimento e fallback
+  // Simulador de trading local (Desativado a pedido do usuário para focar apenas em dados reais)
   function simulateLocalTradingResult(pair, direction, amount, timeframe) {
-    const expirationSeconds = timeframe === 'M5' ? 300 : timeframe === 'M15' ? 900 : 60;
-    
-    logToConsole(`[Simulador] Operação agendada. Aguardando expiração de ${expirationSeconds}s...`, 'info');
-    
-    setTimeout(() => {
-      // Simula assertividade de 55%
-      const win = Math.random() < 0.55;
-      const payout = settings.minPayout;
-      const result = win ? 'WIN' : 'LOSS';
-      
-      const opData = {
-        pair: pair,
-        direction: direction,
-        amount: amount,
-        payout: payout,
-        result: result,
-        date: new Date().toISOString().slice(0, 16),
-        timeframe: timeframe,
-        strategy: 'Robô Simulação',
-        notes: `Simulação local de robô - Sem corretora conectada`,
-        isSimulation: true
-      };
-
-      handleTradingResult(opData);
-    }, expirationSeconds * 1000);
+    // Não simular nada. A ordem falhou e não devemos mostrar logs falsos nem ativar martingales irreais.
+    logToConsole(`🚨 Operação em ${pair} abortada. Modo simulação desligado para focar em dados reais.`, 'warning');
   }
 
   // ---- Gerenciamento de Resultados (Martingale e Soros) ----
@@ -1317,176 +1283,15 @@ const Bot = (() => {
   }
 
   async function fetchEconomicCalendar(force = false) {
-    const SYNC_COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 horas de cache
-    const nowTimestamp = Date.now();
-    const lastSyncStr = localStorage.getItem('bo_economic_calendar_last_sync');
-    const lastSync = lastSyncStr ? parseInt(lastSyncStr, 10) : 0;
-    
-    const lastSyncDate = new Date(lastSync);
-    const today = new Date();
-    const isSameDay = lastSync && 
-                      lastSyncDate.getDate() === today.getDate() &&
-                      lastSyncDate.getMonth() === today.getMonth() &&
-                      lastSyncDate.getFullYear() === today.getFullYear();
-    
-    // Se não for forçado, e o cache for válido (menos de 2 horas) E do mesmo dia, usar o cache local
-    if (!force && lastSync && isSameDay && (nowTimestamp - lastSync < SYNC_COOLDOWN_MS)) {
-      const saved = localStorage.getItem('bo_economic_calendar');
-      if (saved) {
-        const parsedEvents = JSON.parse(saved);
-        renderNewsTable(parsedEvents);
-        console.log(`[Calendário] Usando calendário econômico em cache (Última sincronização: ${new Date(lastSync).toLocaleTimeString()})`);
-        return;
-      }
-    }
-
-    try {
-      const url = 'https://sslecal2.investing.com/?promo_link=&columns=currency,importance,event&importance=1,2,3&features=datepicker,timezone&countries=25,32,6,37,7,5,22,12,4,35,36,110,43,11,26,10,39,120,41,42,24,14,118,53,38,111,113,45,51,34,52,47,19,48,122,125,56,8,55,100,103,107,13,57,109,102,112,123,46,124,147,15,104,119,105,108,121,50,44&calType=day&timeZone=12&lang=12';
-      const response = await fetch(url).then(res => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.text();
-      });
-
-      // Parse do HTML retornado pela Investing.com
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(response, 'text/html');
-      const rows = doc.querySelectorAll('tr[id^="eventRowId_"]');
-      const todayEvents = [];
-
-      rows.forEach(row => {
-        const timeEl = row.querySelector('.time');
-        const currencyEl = row.querySelector('.flagCur');
-        const sentimentEl = row.querySelector('.sentiment');
-        const eventEl = row.querySelector('.event');
-
-        if (timeEl && currencyEl && sentimentEl && eventEl) {
-          const timeStr = timeEl.textContent.trim();
-          const country = currencyEl.textContent.trim();
-          const title = eventEl.textContent.trim();
-
-          // Contar relevância (número de grayFullBullishIcon no sentimentEl)
-          const fullStars = sentimentEl.querySelectorAll('.grayFullBullishIcon').length;
-          let impact = 'Low';
-          if (fullStars === 3) impact = 'High';
-          else if (fullStars === 2) impact = 'Medium';
-
-          const parts = timeStr.split(':');
-          if (parts.length === 2) {
-            const eventDate = new Date();
-            eventDate.setHours(parseInt(parts[0], 10), parseInt(parts[1], 10), 0, 0);
-            
-            todayEvents.push({
-              date: eventDate.toISOString(),
-              country: country,
-              title: title,
-              impact: impact
-            });
-          }
-        }
-      });
-
-      if (todayEvents.length > 0) {
-        localStorage.setItem('bo_economic_calendar', JSON.stringify(todayEvents));
-        localStorage.setItem('bo_economic_calendar_last_sync', nowTimestamp.toString());
-        renderNewsTable(todayEvents);
-        logToConsole(`📅 Calendário de notícias Investing.com sincronizado: ${todayEvents.length} eventos para hoje.`, 'success');
-      } else {
-        throw new Error("Nenhum evento econômico pôde ser parseado no widget.");
-      }
-    } catch (err) {
-      console.warn("[BinaryOps] Servidor de notícias Investing.com indisponível/erro:", err.message);
-      const saved = localStorage.getItem('bo_economic_calendar');
-      if (saved) {
-        renderNewsTable(JSON.parse(saved));
-        logToConsole(`⚠️ Falha na Investing.com (${err.message}). Usando calendário salvo em cache.`, 'warning');
-      } else {
-        const container = document.getElementById('botNewsTableContainer');
-        if (container) {
-          container.innerHTML = `<span style="color:var(--neon-red)">Erro ao conectar com a Investing.com. Verifique a extensão.</span>`;
-        }
-        logToConsole(`❌ Falha ao obter calendário da Investing.com: ${err.message}`, 'error');
-      }
-    }
+    // Função removida a pedido do usuário
   }
 
   function renderNewsTable(events) {
-    const container = document.getElementById('botNewsTableContainer');
-    if (!container) return;
-
-    const todayFormatted = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-    const labelEl = container.previousElementSibling?.querySelector('label');
-    if (labelEl) {
-      labelEl.textContent = `Eventos do Dia (${todayFormatted})`;
-    }
-
-    const data = events || JSON.parse(localStorage.getItem('bo_economic_calendar') || '[]');
-    
-    if (data.length === 0) {
-      container.innerHTML = `<span style="color:var(--text-muted)">Nenhuma notícia econômica para hoje.</span>`;
-      return;
-    }
-
-    let html = '<table style="width:100%; border-collapse:collapse; font-size:0.7rem;">';
-    html += '<thead style="border-bottom:1px solid rgba(255,255,255,0.05); color:var(--text-muted);"><tr><th style="text-align:left; padding: 2px;">Hora</th><th style="text-align:left; padding: 2px;">Moeda</th><th style="text-align:left; padding: 2px;">Evento</th><th style="text-align:right; padding: 2px;">Impacto</th></tr></thead><tbody>';
-    
-    data.forEach(e => {
-      const timeStr = new Date(e.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      let impactBadge = '';
-      if (e.impact === 'High') {
-        impactBadge = '<span style="color:var(--neon-red); font-weight:bold;">● High</span>';
-      } else if (e.impact === 'Medium') {
-        impactBadge = '<span style="color:var(--neon-cyan); font-weight:bold;">● Med</span>';
-      } else {
-        impactBadge = '<span style="color:var(--text-muted);">● Low</span>';
-      }
-      
-      html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.02); height:22px;">
-        <td style="color:var(--neon-green); padding: 2px;">${timeStr}</td>
-        <td style="font-weight:bold; color:var(--text-primary); padding: 2px;">${e.country}</td>
-        <td style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:80px; padding: 2px;" title="${e.title}">${e.title}</td>
-        <td style="text-align:right; padding: 2px;">${impactBadge}</td>
-      </tr>`;
-    });
-    
-    html += '</tbody></table>';
-    container.innerHTML = html;
+    // Removido
   }
 
   function checkNewsFilter(pair) {
-    if (!settings.newsFilter3 && !settings.newsFilter2) return { block: false };
-
-    const cleanPair = pair.replace('-OTC', '');
-    const currencies = cleanPair.split('/');
-    if (currencies.length !== 2) return { block: false };
-
-    const events = JSON.parse(localStorage.getItem('bo_economic_calendar') || '[]');
-    if (events.length === 0) return { block: false };
-
-    const now = new Date();
-    
-    for (let e of events) {
-      if (!currencies.includes(e.country)) continue;
-
-      if (e.impact === 'High' && !settings.newsFilter3) continue;
-      if (e.impact === 'Medium' && !settings.newsFilter2) continue;
-      if (e.impact !== 'High' && e.impact !== 'Medium') continue;
-
-      const newsDate = new Date(e.date);
-      
-      const blockStart = new Date(newsDate.getTime() - settings.newsMinBefore * 60 * 1000);
-      const blockEnd = new Date(newsDate.getTime() + settings.newsMinAfter * 60 * 1000);
-
-      if (now >= blockStart && now <= blockEnd) {
-        return {
-          block: true,
-          event: e,
-          timeStr: newsDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          impactStr: e.impact === 'High' ? '3 Touros (Alto)' : '2 Touros (Médio)'
-        };
-      }
-    }
-
-    return { block: false };
+    return { block: false }; // Sempre passa pois o filtro foi removido
   }
 
   return {

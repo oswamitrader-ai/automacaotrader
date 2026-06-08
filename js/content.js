@@ -189,18 +189,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         monitorOperationResult(message.direction, message.amount, message.payout, message.pair, message.timeframe);
         sendResponse({ status: "success", msg: "Ordem executada via WebSocket API da corretora" });
       } else {
-        console.warn(`[BinaryOps Content Script] ⚠️ WebSocket falhou: ${event.data.error}. Tentando via DOM...`);
-        // FALLBACK: Tentar via clique DOM
-        executeTradingOrder(message.direction, message.amount).then((success) => {
-          if (success) {
-            monitorOperationResult(message.direction, message.amount, message.payout, message.pair, message.timeframe);
-            sendResponse({ status: "success", msg: "Ordem executada via clique DOM (fallback)" });
-          } else {
-            sendResponse({ status: "error", error: "Falha no WebSocket e no clique DOM" });
-          }
-        }).catch((err) => {
-          sendResponse({ status: "error", error: err.message });
-        });
+        console.error(`[BinaryOps Content Script] ⚠️ WebSocket rejeitou/falhou: ${event.data.error}`);
+        // Retornar o erro diretamente para o robô exibir ao usuário ao invés de tentar o DOM, 
+        // pois se o backend rejeitou, o clique na tela também falhará ou causará falso positivo.
+        sendResponse({ status: "error", error: event.data.error || "Falha do servidor (Corretora)" });
       }
     };
 
@@ -217,25 +209,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       accountType: message.accountType
     }, '*');
 
-    // Timeout: se o MAIN world não responder em 5s, cair pro DOM
+    // Timeout: se o MAIN world não responder em 10s, cair pro DOM
     wsTimeout = setTimeout(() => {
       if (!wsResponded) {
         wsResponded = true;
         window.removeEventListener('message', wsResultHandler);
-        console.warn(`[BinaryOps Content Script] ⚠️ Timeout do WebSocket (5s). Tentando via DOM...`);
-        
-        executeTradingOrder(message.direction, message.amount).then((success) => {
-          if (success) {
-            monitorOperationResult(message.direction, message.amount, message.payout, message.pair, message.timeframe);
-            sendResponse({ status: "success", msg: "Ordem executada via clique DOM (fallback timeout)" });
-          } else {
-            sendResponse({ status: "error", error: "Timeout no WebSocket e falha no clique DOM" });
-          }
-        }).catch((err) => {
-          sendResponse({ status: "error", error: err.message });
-        });
+        sendResponse({ status: "error", error: "A extensão injetada na corretora não respondeu a tempo (Timeout Geral). Recarregue a corretora." });
       }
-    }, 5000);
+    }, 10000);
 
     return true;
   }
