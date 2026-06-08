@@ -663,7 +663,20 @@ const Bot = (() => {
   function executeTradingOrder(pair, direction, timeframe) {
     // A checagem de notícias (Anti-loss) foi removida a pedido do usuário.
 
-    const amount = Number(Number(state.nextAmount).toFixed(2));
+    let amount = Number(Number(state.nextAmount).toFixed(2));
+    
+    // FORÇAR A LEITURA DO PAINEL SE FOR A PRIMEIRA ENTRADA (Evita dessincronização)
+    if (state.currentGale === 0 && state.currentSorosStage === 0 && !state.inCyclesRecovery) {
+      const uiAmountEl = document.getElementById('botEntryAmount');
+      if (uiAmountEl) {
+        const uiAmount = parseFloat(uiAmountEl.value);
+        if (!isNaN(uiAmount) && uiAmount > 0) {
+          amount = Number(uiAmount.toFixed(2));
+          state.baseAmount = amount; // Atualiza a base para garantir
+        }
+      }
+    }
+
     const cur = Storage.getSettings().currency === 'USD' ? '$' : 'R$';
     const dirText = direction === 'CALL' ? 'ACIMA' : 'ABAIXO';
     logToConsole(`Enviando ordem: ${pair} -> ${dirText} | Valor: ${cur} ${(amount || 0).toFixed(2)} | Expiração: ${timeframe}`, 'info');
@@ -704,8 +717,7 @@ const Bot = (() => {
       });
       
       if (!targetBrokerTab) {
-        logToConsole(`🚨 [CANCELADO / SIMULADO] Nenhuma aba da corretora aberta foi encontrada para o par ${pair}. Para evitar operar no par errado, a ordem real foi cancelada e executada apenas no simulador local. Abra o par ${pair} na corretora e recarregue a página!`, 'error');
-        simulateLocalTradingResult(pair, direction, amount, timeframe);
+        logToConsole(`🚨 [CANCELADO] Nenhuma aba da corretora aberta foi encontrada para o par ${pair}. Para evitar operar no par errado, a ordem foi cancelada. Abra o par ${pair} na corretora e recarregue a página!`, 'error');
         return; // ABORTAR ENVIO REAL
       }
     }
@@ -729,21 +741,17 @@ const Bot = (() => {
         } else {
           const errorMsg = response ? response.error : 'Sem resposta da corretora';
           logToConsole(`Falha ao injetar ordem na corretora: ${errorMsg}`, 'error');
-          // Fallback: simular resultado localmente caso falhe na injeção real
-          simulateLocalTradingResult(pair, direction, amount, timeframe);
         }
       });
     } else {
-      // Se não houver extensão ou corretora conectada, simular resultado localmente
-      logToConsole(`🚨 [MODO SIMULADO] A corretora (${settings.broker.toUpperCase()}) está desconectada. A ordem foi simulada apenas localmente. Para operar na corretora real, verifique se a aba da corretora está aberta e atualizada (F5).`, 'warning');
-      simulateLocalTradingResult(pair, direction, amount, timeframe);
+      // Se não houver extensão ou corretora conectada, abortar operação
+      logToConsole(`🚨 [FALHA] A corretora (${settings.broker.toUpperCase()}) está desconectada. A ordem foi cancelada. Para operar na corretora real, verifique se a aba da corretora está aberta e atualizada (F5).`, 'error');
     }
   }
 
-  // Simulador de trading local (Desativado a pedido do usuário para focar apenas em dados reais)
+  // Simulador de trading local (Removido)
   function simulateLocalTradingResult(pair, direction, amount, timeframe) {
-    // Não simular nada. A ordem falhou e não devemos mostrar logs falsos nem ativar martingales irreais.
-    logToConsole(`🚨 Operação em ${pair} abortada. Modo simulação desligado para focar em dados reais.`, 'warning');
+    // Função obsoleta. Removida para evitar simulações indesejadas.
   }
 
   // ---- Gerenciamento de Resultados (Martingale e Soros) ----
@@ -830,7 +838,9 @@ const Bot = (() => {
       if (settings.useMartingale && state.currentGale < settings.martingales) {
         state.currentGale++;
         state.nextAmount = Number((opData.amount * settings.galeFactor).toFixed(2));
-        logToConsole(`[Martingale] LOSS! Aplicando Gale nível ${state.currentGale}. Próxima entrada: ${cur} ${state.nextAmount.toFixed(2)}`, 'warning');
+        logToConsole(`[Martingale] LOSS! Aplicando Gale nível ${state.currentGale} imediatamente na próxima vela.`, 'warning');
+        // Disparar a operação do Gale IMEDIATAMENTE
+        executeTradingOrder(opData.pair, opData.direction, opData.timeframe);
       } else {
         state.currentGale = 0;
         state.currentSorosStage = 0;

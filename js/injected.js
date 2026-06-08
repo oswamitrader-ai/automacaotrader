@@ -19,14 +19,21 @@
     const ws = new OriginalWebSocket(url, protocols);
     activeWebSockets.add(ws);
 
-    // Sobrescrever o método send original
     const originalSend = ws.send;
     ws.send = function(data) {
+      if (!window.__binaryOps_balances && !this._balancesRequested) {
+        this._balancesRequested = true;
+        try { originalSend.call(this, JSON.stringify({"name":"sendMessage","msg":{"name":"get-balances","version":"1.0"}})); } catch(e) {}
+      }
       try {
         const parsed = JSON.parse(data);
-        // Salvar logs de mensagens de trading
         if (parsed.name === "sendMessage" && parsed.msg && parsed.msg.name === "get-candles") {
           console.log("[BinaryOps WS Sent][get-candles]", parsed);
+        }
+        
+        // Tentar capturar balance_id se a corretora enviar em alguma outra requisição
+        if (parsed.msg && parsed.msg.body && parsed.msg.body.user_balance_id) {
+            window.__binaryOps_lastSeenBalanceId = parsed.msg.body.user_balance_id;
         }
       } catch (e) {}
       return originalSend.apply(this, arguments);
@@ -88,7 +95,9 @@
         }
 
         if (name === "profile" || name === "balances") {
-          const balances = parsed.msg && parsed.msg.balances;
+          let balances = (parsed.msg && parsed.msg.balances) || parsed.balances;
+          if (!balances && Array.isArray(parsed.msg)) balances = parsed.msg;
+          
           if (Array.isArray(balances)) {
             window.__binaryOps_balances = window.__binaryOps_balances || {};
             balances.forEach(b => {
@@ -171,6 +180,11 @@
   // { name: "sendMessage", msg: { name: "binary-options.open-option", body: { ... } } }
   // Isso é MUITO mais confiável do que clicar em botões DOM/Canvas.
 
+  function showErrorAlert(errMsg) {
+    // Removido a pedido do usuário. Os logs ainda vão pro console, mas o card vermelho sumiu.
+    console.warn("[BinaryOps] (Alerta Oculto) Motivo da falha WS:", errMsg);
+  }
+
   window.addEventListener('message', (event) => {
     if (!event.data || event.data.type !== 'binaryops_place_order_ws') return;
 
@@ -179,7 +193,8 @@
 
     const wsSet = window.__binaryOps_ws;
     if (!wsSet || wsSet.size === 0) {
-      window.postMessage({ type: 'binaryops_order_result', requestId, status: 'error', error: 'Nenhum WebSocket capturado. Recarregue a corretora (F5).' }, '*');
+      showErrorAlert('Nenhum WebSocket capturado. O robô foi injetado tarde demais. Tente dar um CTRL+F5 na página.');
+      window.postMessage({ type: 'binaryops_order_result', requestId, status: 'error', error: 'Nenhum WebSocket capturado.' }, '*');
       return;
     }
 
@@ -190,7 +205,29 @@
     });
 
     if (!openWs) {
-      window.postMessage({ type: 'binaryops_order_result', requestId, status: 'error', error: 'Nenhum WebSocket está aberto (OPEN).' }, '*');
+      showErrorAlert('Nenhum WebSocket está aberto (OPEN). A corretora pode estar desconectada.');
+      window.postMessage({ type: 'binaryops_order_result', requestId, status: 'error', error: 'Nenhum WebSocket aberto.' }, '*');
+      return;
+    }
+
+    // Calcular ID do Saldo da Conta (Demo vs Real)
+    const balances = window.__binaryOps_balances || {};
+    let userBalanceId = window.__binaryOps_lastSeenBalanceId || 0;
+    
+    if (accountType === 'real' && balances.real) {
+      userBalanceId = balances.real;
+    } else if (accountType === 'demo' && balances.demo) {
+      userBalanceId = balances.demo;
+    } else if (balances.demo && userBalanceId === 0) {
+      userBalanceId = balances.demo;
+    }
+
+    if (userBalanceId === 0) {
+      // Se ainda for zero, pede pra corretora enviar os saldos agora mesmo e usa o fallback de DOM por enquanto
+      try { openWs.send(JSON.stringify({"name":"sendMessage","msg":{"name":"get-balances","version":"1.0"}})); } catch(e){}
+      
+      showErrorAlert('ID da sua conta (Real/Demo) ainda não foi detectado pela injeção. O robô vai tentar clicar na tela desta vez, mas para a próxima, o ID já foi solicitado ao servidor!');
+      window.postMessage({ type: 'binaryops_order_result', requestId, status: 'error', error: 'user_balance_id é ZERO.' }, '*');
       return;
     }
 
@@ -344,12 +381,23 @@
           clearTimeout(responseTimeout);
           openWs.removeEventListener('message', responseHandler);
 
-          if (msgName === 'error' || (data.msg && data.msg.message)) {
-            const errMsg = (data.msg && data.msg.message) || 'Erro desconhecido da corretora';
-            console.error(`[BinaryOps Interceptor] Ordem rejeitada:`, errMsg);
+          const optionId = (data.msg && data.msg.id) || data.id;
+
+          if (msgName === 'error' || 
+             (data.msg && data.msg.message) || 
+             (data.msg && data.msg.isSuccessful === false) ||
+             (data.msg && data.msg.status === 'error') ||
+             !optionId) {
+            
+            const errMsg = (data.msg && data.msg.message) || data.message || 'Corretora rejeitou a ordem (Nenhum ID de operação gerado)';
+            console.error(`[BinaryOps Interceptor] Ordem rejeitada via WS:`, errMsg, data);
+            
+            const rawError = JSON.stringify(data);
+            showErrorAlert(errMsg + '<br><br><b>ERRO BRUTO (Mande print disso para o dev):</b><br><span style="font-size:0.7em; word-break: break-all;">' + rawError + '</span>');
+
             window.postMessage({ type: 'binaryops_order_result', requestId, status: 'error', error: errMsg }, '*');
           } else {
-            console.log(`[BinaryOps Interceptor] Ordem aceita pela corretora!`, data);
+            console.log(`[BinaryOps Interceptor] Ordem aceita pela corretora! ID: ${optionId}`, data);
             window.postMessage({ type: 'binaryops_order_result', requestId, status: 'success', data: data.msg || data }, '*');
           }
         }

@@ -186,13 +186,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       if (event.data.status === 'success') {
         console.log(`[BinaryOps Content Script] ✅ Ordem executada via WebSocket API!`);
+        
+        // Atualizar visualmente o campo de valor na tela apenas para dar feedback ao usuário
+        try {
+          const inputs = document.querySelectorAll('input:not([type="hidden"])');
+          const keywords = ['amount', 'valor', 'invest', 'deal-amount'];
+          let visualAmountEl = null;
+          for (let input of inputs) {
+            const ph = (input.placeholder || '').toLowerCase();
+            const ariaph = (input.getAttribute('aria-placeholder') || '').toLowerCase();
+            if (keywords.some(k => ph.includes(k) || ariaph.includes(k))) {
+              visualAmountEl = input; break;
+            }
+          }
+          if (visualAmountEl) {
+            const valStr = Number.isInteger(Number(message.amount)) ? Number(message.amount).toString() : Number(message.amount).toFixed(2);
+            visualAmountEl.value = valStr;
+          }
+        } catch(e) {}
+
         monitorOperationResult(message.direction, message.amount, message.payout, message.pair, message.timeframe);
         sendResponse({ status: "success", msg: "Ordem executada via WebSocket API da corretora" });
       } else {
-        console.error(`[BinaryOps Content Script] ⚠️ WebSocket rejeitou/falhou: ${event.data.error}`);
-        // Retornar o erro diretamente para o robô exibir ao usuário ao invés de tentar o DOM, 
-        // pois se o backend rejeitou, o clique na tela também falhará ou causará falso positivo.
-        sendResponse({ status: "error", error: event.data.error || "Falha do servidor (Corretora)" });
+        console.warn(`[BinaryOps Content Script] ⚠️ WebSocket rejeitou/falhou: ${event.data.error}. Tentando fallback DOM...`);
+        executeTradingOrder(message.direction, message.amount)
+          .then(() => {
+            monitorOperationResult(message.direction, message.amount, message.payout, message.pair, message.timeframe);
+            sendResponse({ status: "success", msg: "Ordem executada via cliques na tela (Fallback)" });
+          })
+          .catch(e => {
+            sendResponse({ status: "error", error: "WS falhou e DOM falhou: " + e.message });
+          });
       }
     };
 
@@ -209,14 +233,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       accountType: message.accountType
     }, '*');
 
-    // Timeout: se o MAIN world não responder em 10s, cair pro DOM
+    // Timeout: se o MAIN world não responder em 4s, cair pro DOM
     wsTimeout = setTimeout(() => {
       if (!wsResponded) {
         wsResponded = true;
         window.removeEventListener('message', wsResultHandler);
-        sendResponse({ status: "error", error: "A extensão injetada na corretora não respondeu a tempo (Timeout Geral). Recarregue a corretora." });
+        console.warn("[BinaryOps Content Script] Timeout WS. Tentando fallback via DOM...");
+
+        executeTradingOrder(message.direction, message.amount)
+          .then(() => {
+            monitorOperationResult(message.direction, message.amount, message.payout, message.pair, message.timeframe);
+            sendResponse({ status: "success", msg: "Ordem executada via cliques na tela (Timeout)" });
+          })
+          .catch(e => {
+            sendResponse({ status: "error", error: "Timeout WS e Falha no DOM: " + e.message });
+          });
       }
-    }, 10000);
+    }, 4000);
 
     return true;
   }
@@ -279,133 +312,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Função para simular clique de trading
 async function executeTradingOrder(direction, amount) {
   const sel = SELECTORS[broker] || SELECTORS.exnova; // Fallback para Exnova
-  
-  // 1. Achar o campo de valor e definir o valor
-  let amountEl = null;
-  let coords = null;
-  
-  try {
-    const coordsObj = await chrome.storage.local.get('calibrationCoords');
-    coords = coordsObj.calibrationCoords || {};
-    
-    if (coords['AMOUNT'] && coords['AMOUNT'].x) {
-      console.log(`[BinaryOps] Usando coordenada CALIBRADA para o campo de VALOR em X:${coords['AMOUNT'].x}, Y:${coords['AMOUNT'].y}`);
-      
-      // Clicar fisicamente no local calibrado do valor
-      simulateMouseClickByCoords(coords['AMOUNT'].x, coords['AMOUNT'].y);
-      await new Promise(resolve => setTimeout(resolve, 300)); // Tempo pro input aparecer/focar (aumentado para 300ms)
-      
-      const elAtPoint = document.elementFromPoint(coords['AMOUNT'].x, coords['AMOUNT'].y);
-      if (elAtPoint) {
-        if (elAtPoint.tagName && elAtPoint.tagName.toLowerCase() === 'input') {
-          amountEl = elAtPoint;
-        } else {
-          amountEl = elAtPoint.querySelector('input') || (elAtPoint.parentElement && elAtPoint.parentElement.querySelector('input'));
-        }
-      }
-      
-      if (!amountEl && document.activeElement && document.activeElement.tagName && document.activeElement.tagName.toLowerCase() === 'input') {
-        amountEl = document.activeElement;
-      }
-      
-      if (amountEl) {
-        console.log("[BinaryOps] Input de valor calibrado encontrado. Injetando via React Setter...");
-        amountEl.focus();
-        amountEl.select();
-        
-        try {
-          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-          if (nativeInputValueSetter) {
-            nativeInputValueSetter.call(amountEl, Number(amount).toFixed(2));
-          } else {
-            amountEl.value = Number(amount).toFixed(2);
-          }
-        } catch (e) {
-          amountEl.value = Number(amount).toFixed(2);
-        }
-        
-        amountEl.dispatchEvent(new Event('input', { bubbles: true }));
-        amountEl.dispatchEvent(new Event('change', { bubbles: true }));
-        amountEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
-        amountEl.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, bubbles: true }));
-        amountEl.blur();
-        
-      } else {
-        // Modo Canvas (Não há tag input HTML)
-        console.log("[BinaryOps] Modo Canvas: Usando Super Typer...");
-        const targetElement = elAtPoint || document.activeElement || document.body;
-        
-        const sendKey = async (key, keyCode) => {
-          targetElement.dispatchEvent(new KeyboardEvent('keydown', { key: key, keyCode: keyCode, which: keyCode, bubbles: true }));
-          targetElement.dispatchEvent(new KeyboardEvent('keypress', { key: key, keyCode: keyCode, which: keyCode, bubbles: true }));
-          await new Promise(r => setTimeout(r, 25));
-          targetElement.dispatchEvent(new KeyboardEvent('keyup', { key: key, keyCode: keyCode, which: keyCode, bubbles: true }));
-          await new Promise(r => setTimeout(r, 25));
-        };
-
-        // Apagar tudo enviando vários Backspaces e Deletes
-        for (let i = 0; i < 10; i++) {
-          await sendKey('Backspace', 8);
-          await sendKey('Delete', 46);
-        }
-        
-        // Se for inteiro, não digita os centavos (evita digitar ponto/vírgula e dar erro na corretora)
-        const amtNum = Number(amount);
-        let valStr = "";
-        if (Number.isInteger(amtNum)) {
-          valStr = amtNum.toString();
-        } else {
-          valStr = amtNum.toFixed(2);
-        }
-        
-        for (let i = 0; i < valStr.length; i++) {
-          const char = valStr[i];
-          let code = char.charCodeAt(0);
-          if (char === '.') {
-            code = 190; // KeyCode correto para PONTO no teclado físico
-          } else if (char === ',') {
-            code = 188; // KeyCode correto para VÍRGULA no teclado físico
-          }
-          await sendKey(char, code);
-        }
-        
-        await sendKey('Enter', 13);
-        if (targetElement.blur) targetElement.blur();
-      }
-      
-      // Se calibramos, pulamos o resto do fluxo de Amount
-      console.log("[BinaryOps] Valor calibrado processado.");
-    }
-  } catch(e) {
-    console.error("Erro na calibração do amount:", e);
-  }
-
-  // Fallback padrão se não usou calibragem
-  if (!amountEl && !(coords && coords['AMOUNT'] && coords['AMOUNT'].x)) {
-    amountEl = document.querySelector(sel.amountInput) || findInputByPlaceholderOrLabel();
-    
-    if (amountEl) {
-      console.log("[BinaryOps Content Script] Input de valor encontrado via DOM:", amountEl);
-      amountEl.focus();
-      try {
-        amountEl.select();
-        document.execCommand('insertText', false, Number(amount).toFixed(2));
-      } catch(e) {}
-      try {
-        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-        if (nativeInputValueSetter) nativeInputValueSetter.call(amountEl, Number(amount).toFixed(2));
-      } catch (e) {
-        amountEl.value = Number(amount).toFixed(2);
-      }
-      amountEl.dispatchEvent(new Event('input', { bubbles: true }));
-      amountEl.dispatchEvent(new Event('change', { bubbles: true }));
-      amountEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
-      amountEl.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, bubbles: true }));
-      amountEl.blur();
-    } else {
-      console.warn("Campo de valor não encontrado via DOM.");
-    }
-  }
+  console.log("[BinaryOps] Ordem usando o valor atual do painel da corretora.");
   
   // Nível 0: Tentativa via Coordenadas Calibradas (A arma definitiva contra Canvas)
   try {
