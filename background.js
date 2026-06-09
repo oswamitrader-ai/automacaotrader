@@ -33,12 +33,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Ping de status vindo do Dashboard
   if (message.action === "get_connected_brokers") {
-    const activeBrokers = [];
-    brokerTabs.forEach((info, id) => {
-      activeBrokers.push({ tabId: id, broker: info.broker, title: info.title });
+    // Para evitar perda de conexão em caso de restart do Service Worker (MV3), vamos consultar as abas ativas
+    chrome.tabs.query({ url: ["*://*.exnova.com/*", "*://*.iqoption.com/*", "*://*.bullex.com/*", "*://*.exnova.com", "*://*.iqoption.com", "*://*.bullex.com"] }, (tabs) => {
+      const activeBrokers = [];
+      tabs.forEach(t => {
+        let brokerName = 'desconhecido';
+        if (t.url.includes('exnova')) brokerName = 'exnova';
+        else if (t.url.includes('iqoption')) brokerName = 'iqoption';
+        else if (t.url.includes('bullex')) brokerName = 'bullex';
+        
+        activeBrokers.push({ tabId: t.id, broker: brokerName, title: t.title });
+        
+        // Restaurar o mapa na memória caso o Service Worker tenha reiniciado
+        if (!brokerTabs.has(t.id)) {
+          brokerTabs.set(t.id, { broker: brokerName, url: t.url, title: t.title });
+        }
+      });
+      sendResponse({ brokers: activeBrokers });
     });
-    sendResponse({ brokers: activeBrokers });
-    return true;
+    return true; // Mantém o canal aberto para a resposta assíncrona
   }
 
   // Encaminhar sinal/ordem do Dashboard para a corretora

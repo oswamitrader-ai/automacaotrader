@@ -219,14 +219,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         } catch(e) {}
 
-        monitorOperationResult(message.direction, message.amount, message.payout, message.pair, message.timeframe);
         sendResponse({ status: "success", msg: "Ordem executada via WebSocket API da corretora" });
       } else {
         console.warn(`[BinaryOps Content Script] ⚠️ WebSocket rejeitou/falhou: ${event.data.error}. Tentando fallback DOM...`);
         executeTradingOrder(message.direction, message.amount)
           .then(() => {
             monitorOperationResult(message.direction, message.amount, message.payout, message.pair, message.timeframe);
-            sendResponse({ status: "success", msg: "Ordem executada via cliques na tela (Fallback)" });
+            sendResponse({ status: "success", msg: `Fallback DOM (Aviso WS: ${event.data.error})` });
           })
           .catch(e => {
             sendResponse({ status: "error", error: "WS falhou e DOM falhou: " + e.message });
@@ -257,7 +256,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         executeTradingOrder(message.direction, message.amount)
           .then(() => {
             monitorOperationResult(message.direction, message.amount, message.payout, message.pair, message.timeframe);
-            sendResponse({ status: "success", msg: "Ordem executada via cliques na tela (Timeout)" });
+            sendResponse({ status: "success", msg: "Fallback DOM (Timeout WS)" });
           })
           .catch(e => {
             sendResponse({ status: "error", error: "Timeout WS e Falha no DOM: " + e.message });
@@ -327,7 +326,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function executeTradingOrder(direction, amount) {
   const sel = SELECTORS[broker] || SELECTORS.exnova; // Fallback para Exnova
   const amountEl = document.querySelector(sel.amountInput);
-  console.log("[BinaryOps] Ordem usando o valor atual do painel da corretora.");
+  console.log("[BinaryOps] Tentando ajustar valor da ordem na tela para: " + amount);
+
+  if (amountEl && amount) {
+    try {
+      // Tentar alterar o valor visualmente para o Fallback não usar a banca toda acidentalmente
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      if (nativeInputValueSetter) {
+        nativeInputValueSetter.call(amountEl, amount);
+      } else {
+        amountEl.value = amount;
+      }
+      amountEl.dispatchEvent(new Event('input', { bubbles: true }));
+      amountEl.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch (e) {
+      console.warn("Erro ao tentar alterar o valor no DOM:", e);
+    }
+  }
   
   // Nível 0: Tentativa via Coordenadas Calibradas (A arma definitiva contra Canvas)
   try {
@@ -765,8 +780,7 @@ function monitorOperationResult(direction, amount, payout, pair, timeframe) {
     // Tempo máximo excedido
     if (checkCount >= maxChecks) {
       clearInterval(interval);
-      console.log("[BinaryOps Content Script] Timeout no monitoramento de resultado.");
-      reportResult(direction, 'DRAW', amount, payout, pair, timeframe);
+      console.log("[BinaryOps Content Script] Timeout no monitoramento de resultado. A ordem provavelmente falhou ao ser clicada ou não foi executada. Nenhum resultado será enviado ao Dashboard.");
     }
   }, 2000);
 }

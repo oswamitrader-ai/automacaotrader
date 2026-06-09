@@ -7,9 +7,16 @@
 (() => {
   console.log("[BinaryOps Interceptor] Script MAIN world carregado.");
   
+  if (window.__binaryOps_injectedLoaded) {
+    console.warn("[BinaryOps Interceptor] Script já estava carregado. Ignorando re-injeção.");
+    return;
+  }
+  window.__binaryOps_injectedLoaded = true;
+  
   // Set global acessível por chrome.scripting.executeScript
   window.__binaryOps_ws = window.__binaryOps_ws || new Set();
   window.__binaryOps_lastMsgs = window.__binaryOps_lastMsgs || [];
+  window.__binaryOps_openedOptionIds = window.__binaryOps_openedOptionIds || new Set();
   
   const activeWebSockets = window.__binaryOps_ws;
   const OriginalWebSocket = window.WebSocket;
@@ -241,6 +248,10 @@
       pairVariations.push(pair.replace('-OTC', '(OTC)'));
       pairVariations.push(pair.replace('-OTC', ' (OTC)'));
       pairVariations.push(pair.replace('/', '').replace('-OTC', '-OTC'));
+    } else {
+      // Se o par não tiver OTC no nome, mas a corretora só tiver a versão OTC aberta:
+      pairVariations.push(pair + '-OTC');
+      pairVariations.push(pair + ' (OTC)');
     }
     
     for (let variant of pairVariations) {
@@ -380,21 +391,22 @@
              (data.msg && data.msg.status === 'error') ||
              !optionId) {
             
-            const errMsg = (data.msg && data.msg.message) || data.message || 'Corretora rejeitou a ordem (Nenhum ID de operação gerado)';
-            console.error(`[BinaryOps Interceptor] Ordem rejeitada via WS:`, errMsg, data);
+            const errMsg = (data.msg && data.msg.message) || data.message || 'A corretora recusou a transação (Motivo genérico ou Par/Timeframe indisponível).';
+            console.warn(`[BinaryOps Interceptor] Falha ao enviar ordem: ${errMsg}`);
             
-            const rawError = JSON.stringify(data);
-            showErrorAlert(errMsg + '<br><br><b>ERRO BRUTO (Mande print disso para o dev):</b><br><span style="font-size:0.7em; word-break: break-all;">' + rawError + '</span>');
-
             window.postMessage({ type: 'binaryops_order_result', requestId, status: 'error', error: errMsg }, '*');
           } else {
             console.log(`[BinaryOps Interceptor] Ordem aceita pela corretora! ID: ${optionId}`, data);
+            window.__binaryOps_openedOptionIds.add(String(optionId));
             window.postMessage({ type: 'binaryops_order_result', requestId, status: 'success', data: data.msg || data }, '*');
           }
         }
         // Resposta via broadcast de abertura de opção da corretora
         if (msgName === 'option' || msgName === 'option-opened' || msgName === 'binary-options.option-opened' || (data.msg && data.msg.name === 'option-opened')) {
           const optData = data.msg || data;
+          if (optData.id) {
+             window.__binaryOps_openedOptionIds.add(String(optData.id));
+          }
           // Validar se o broadcast é da opção que acabamos de mandar (mesmo par e direção)
           if (String(optData.active_id) === String(activeId) && String(optData.direction) === String(dir)) {
             if (!responded) {

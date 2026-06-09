@@ -663,6 +663,42 @@ const Bot = (() => {
   function executeTradingOrder(pair, direction, timeframe) {
     // A checagem de notícias (Anti-loss) foi removida a pedido do usuário.
 
+    // === VERIFICAÇÃO DE METAS E LIMITES (GLOBAIS E LOCAIS) ===
+    if (typeof Metrics !== 'undefined' && typeof Storage !== 'undefined') {
+      const ops = Storage.getOperations();
+      const dbSettings = Storage.getSettings();
+      const goals = Storage.getGoals();
+      const progress = Metrics.calculateGoalsProgress(ops, goals);
+      const dailyGoals = progress.daily;
+      const cur = dbSettings.currency === 'USD' ? '$' : 'R$';
+      
+      let blockReason = null;
+      
+      // Checar Metas Globais do Dashboard
+      if (dailyGoals.profit.status === 'achieved') {
+        blockReason = `Meta Diária de Lucro batida (${cur} ${dailyGoals.profit.current.toFixed(2)})`;
+      } else if (dailyGoals.loss.status === 'exceeded') {
+        blockReason = `Stop Loss Diário atingido (${cur} ${dailyGoals.loss.current.toFixed(2)})`;
+      } else if (dailyGoals.ops.status === 'exceeded') {
+        blockReason = `Máximo de Operações atingido (${dailyGoals.ops.current} ops)`;
+      }
+      
+      // Checar Metas Locais do Robô
+      const metrics = Metrics.calculate(ops, dbSettings);
+      const todayProfit = metrics.todayMetrics.netProfit;
+      if (!blockReason && settings.stopWin > 0 && todayProfit >= settings.stopWin) {
+        blockReason = `Stop Win do Robô alcançado (${cur} ${todayProfit.toFixed(2)})`;
+      } else if (!blockReason && settings.stopLoss > 0 && todayProfit <= -Math.abs(settings.stopLoss)) {
+        blockReason = `Stop Loss do Robô atingido (${cur} ${todayProfit.toFixed(2)})`;
+      }
+
+      if (blockReason) {
+        logToConsole(`[BLOQUEIO] Ordem cancelada! ${blockReason}.`, 'error');
+        if (settings.active) document.getElementById('botToggle')?.click(); // Desliga o robô
+        return; // Aborta a execução da ordem
+      }
+    }
+
     let amount = Number(Number(state.nextAmount).toFixed(2));
     
     // FORÇAR A LEITURA DO PAINEL SE FOR A PRIMEIRA ENTRADA (Evita dessincronização)
@@ -737,7 +773,8 @@ const Bot = (() => {
         accountType: settings.accountType
       }, (response) => {
         if (response && response.status === "success") {
-          logToConsole(`Ordem recebida pela corretora. Aguardando resultado da operação...`, 'success');
+          const extra = response.msg ? ` (${response.msg})` : '';
+          logToConsole(`Ordem recebida pela corretora${extra}. Aguardando resultado da operação...`, 'success');
         } else {
           const errorMsg = response ? response.error : 'Sem resposta da corretora';
           logToConsole(`Falha ao injetar ordem na corretora: ${errorMsg}`, 'error');
@@ -858,20 +895,30 @@ const Bot = (() => {
       state.nextAmount = state.baseAmount;
     }
 
-    // 3. Checar Stop Win e Stop Loss Automáticos
+    // 3. Checar Metas Globais e Limites Locais
     if (typeof Metrics !== 'undefined' && settings.active) {
       const ops = Storage.getOperations();
       const dbSettings = Storage.getSettings();
+      const goals = Storage.getGoals();
+      const progress = Metrics.calculateGoalsProgress(ops, goals);
+      const dailyGoals = progress.daily;
       const metrics = Metrics.calculate(ops, dbSettings);
       const todayProfit = metrics.todayMetrics.netProfit;
       
       const cur = dbSettings.currency === 'USD' ? '$' : 'R$';
+      let blockReason = null;
+      let blockType = 'error';
       
-      if (settings.stopWin > 0 && todayProfit >= settings.stopWin) {
-        logToConsole(`[META BATIDA] Stop Win alcançado! Lucro de ${cur} ${todayProfit.toFixed(2)}. Parando robô...`, 'success');
-        document.getElementById('botToggle')?.click(); // Desliga o robô
-      } else if (settings.stopLoss > 0 && todayProfit <= -Math.abs(settings.stopLoss)) {
-        logToConsole(`[STOP LOSS] Limite de prejuízo diário atingido! Prejuízo de ${cur} ${todayProfit.toFixed(2)}. Parando robô para proteção...`, 'error');
+      // Globais
+      if (dailyGoals.profit.status === 'achieved') { blockReason = `Meta Diária de Lucro batida (${cur} ${dailyGoals.profit.current.toFixed(2)})`; blockType = 'success'; }
+      else if (dailyGoals.loss.status === 'exceeded') { blockReason = `Stop Loss Diário atingido (${cur} ${dailyGoals.loss.current.toFixed(2)})`; }
+      else if (dailyGoals.ops.status === 'exceeded') { blockReason = `Máximo de Operações atingido (${dailyGoals.ops.current} ops)`; blockType = 'warning'; }
+      // Locais
+      else if (settings.stopWin > 0 && todayProfit >= settings.stopWin) { blockReason = `Stop Win do Robô alcançado (${cur} ${todayProfit.toFixed(2)})`; blockType = 'success'; }
+      else if (settings.stopLoss > 0 && todayProfit <= -Math.abs(settings.stopLoss)) { blockReason = `Stop Loss do Robô atingido (${cur} ${todayProfit.toFixed(2)})`; }
+
+      if (blockReason) {
+        logToConsole(`[BLOQUEIO] ${blockReason}. Parando robô imediatamente para proteção da banca.`, blockType);
         document.getElementById('botToggle')?.click(); // Desliga o robô
       }
     }
