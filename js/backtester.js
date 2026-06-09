@@ -4,7 +4,9 @@
 
 const Backtester = (() => {
   let backtestChart = null;
-  let activeData = null; // Guardará o padrão ativo sob simulação
+  let activeDataList = []; // Guardará os padrões sob simulação
+  let activeCandles = [];
+  let activePair = '';
 
   function init() {
     setupUIEvents();
@@ -12,7 +14,7 @@ const Backtester = (() => {
 
   function setupUIEvents() {
     document.getElementById('btnRunBacktest')?.addEventListener('click', () => {
-      if (activeData) {
+      if (activeDataList.length > 0) {
         runSimulation();
       }
     });
@@ -48,9 +50,11 @@ const Backtester = (() => {
     }
   }
 
-  // Acionado pelo catalogador ao clicar em "Testar"
+  // Acionado pelo catalogador ao clicar em "Testar" (único padrão)
   function open(patternData) {
-    activeData = patternData;
+    activeDataList = [patternData];
+    activeCandles = patternData.candles;
+    activePair = patternData.pair;
     
     // Atualizar título
     const titleEl = document.getElementById('backtestModalTitle');
@@ -58,7 +62,24 @@ const Backtester = (() => {
       titleEl.innerHTML = `📊 Backtesting: ${patternData.pattern} [${patternData.pair}]`;
     }
 
-    // Configurações padrão carregadas a partir do robô se existirem, ou do padrão do robô
+    initSettingsAndRun();
+  }
+
+  // Acionado pelo catalogador ao clicar em "Testar Todos"
+  function openAll(patternsArray, candles, pair) {
+    activeDataList = patternsArray;
+    activeCandles = candles;
+    activePair = pair;
+    
+    const titleEl = document.getElementById('backtestModalTitle');
+    if (titleEl) {
+      titleEl.innerHTML = `📊 Backtesting: Múltiplos Padrões (${patternsArray.length}) [${pair}]`;
+    }
+
+    initSettingsAndRun();
+  }
+
+  function initSettingsAndRun() {
     let botSettings = {};
     try {
       const saved = localStorage.getItem('bo_bot_settings');
@@ -66,9 +87,8 @@ const Backtester = (() => {
     } catch (e) {}
 
     document.getElementById('bkAmount').value = botSettings.entryAmount || 10;
-    document.getElementById('bkPayout').value = activeData.payout || botSettings.minPayout || 80;
+    document.getElementById('bkPayout').value = activeDataList[0]?.payout || botSettings.minPayout || 80;
     
-    // Configurações de Gerenciamento do Backtest vindas do Robô
     const useMartingaleEl = document.getElementById('bkUseMartingale');
     if (useMartingaleEl) useMartingaleEl.checked = botSettings.useMartingale !== false;
     
@@ -90,18 +110,13 @@ const Backtester = (() => {
     const cyclesConfigEl = document.getElementById('bkCyclesConfig');
     if (cyclesConfigEl) cyclesConfigEl.value = botSettings.cyclesConfig || "C1: 10, 20\nC2: 15, 30\nC3: 25, 55";
     
-    // Sincronizar visibilidade
     updateMgmtFields();
-    
-    // Navegar para a página de backtest
     UI.navigateTo('backtest');
-    
-    // Roda a simulação inicial
     setTimeout(runSimulation, 50);
   }
 
   function runSimulation() {
-    if (!activeData || !activeData.candles || activeData.candles.length === 0) {
+    if (activeDataList.length === 0 || !activeCandles || activeCandles.length === 0) {
       UI.showToast('Nenhum dado de vela disponível para simulação.', 'error');
       return;
     }
@@ -120,11 +135,7 @@ const Backtester = (() => {
     const maxSorosLevel = parseInt(document.getElementById('bkSorosLevel')?.value) || 1;
     const waitCycleBreak = document.getElementById('bkWaitCycleBreak')?.checked ?? true;
 
-    const candles = activeData.candles;
-    const rawPattern = activeData.rawPattern;
-    const entry = activeData.entry.split(' ')[0]; // Limpa sufixos ex: "CALL (Reversão)" -> "CALL"
-    const isExhaustion = activeData.pattern.includes('Exaustão') || activeData.pattern.includes('Continuidade');
-    const isTimeMode = activeData.pattern.includes('minuto');
+    const candles = activeCandles;
 
     let bank = startBank;
     let peak = startBank;
@@ -167,7 +178,8 @@ const Backtester = (() => {
     const simOps = [];
     let sequenceColorToBreak = null;
     
-    const K = rawPattern ? rawPattern.length : 1;
+    // Maior K entre os padrões
+    const K = Math.max(...activeDataList.map(p => p.rawPattern ? p.rawPattern.length : 1));
 
     for (let i = K; i < candles.length; i++) {
       if (waitCycleBreak && sequenceColorToBreak) {
@@ -178,40 +190,57 @@ const Backtester = (() => {
         }
       }
 
-      let isMatch = false;
+      let matchedPatternData = null;
 
-      if (isTimeMode) {
-        // Modo por Minuto da Hora
-        const targetMin = parseInt(rawPattern.replace(':', ''));
-        const candleMin = candles[i].time.getMinutes();
-        if (candleMin === targetMin) {
-          isMatch = true;
-        }
-      } else if (isExhaustion) {
-        // Modo Exaustão de Tendência
-        const firstColor = candles[i - K].color;
-        let allSame = true;
-        for (let j = i - K + 1; j < i; j++) {
-          if (candles[j].color !== firstColor) {
-            allSame = false;
-            break;
+      // Testa todos os padrões
+      for (let pd of activeDataList) {
+        const pRaw = pd.rawPattern;
+        const pIsTimeMode = pd.pattern.includes('minuto');
+        const pIsExhaustion = pd.pattern.includes('Exaustão') || pd.pattern.includes('Continuidade');
+        const pK = pRaw ? pRaw.length : 1;
+        
+        let isMatch = false;
+
+        if (pIsTimeMode) {
+          const targetMin = parseInt(pRaw.replace(':', ''));
+          const candleMin = candles[i].time.getMinutes();
+          if (candleMin === targetMin) {
+            isMatch = true;
+          }
+        } else if (pIsExhaustion) {
+          const firstColor = candles[i - pK].color;
+          let allSame = true;
+          for (let j = i - pK + 1; j < i; j++) {
+            if (candles[j].color !== firstColor) {
+              allSame = false;
+              break;
+            }
+          }
+          if (allSame && firstColor === pRaw[0]) {
+            isMatch = true;
+          }
+        } else {
+          let seq = '';
+          for (let j = pK; j > 0; j--) {
+            seq += candles[i - j].color;
+          }
+          if (seq === pRaw) {
+            isMatch = true;
           }
         }
-        if (allSame && firstColor === rawPattern[0]) {
-          isMatch = true;
-        }
-      } else {
-        // Modo Padrão de Cores normal
-        let seq = '';
-        for (let j = K; j > 0; j--) {
-          seq += candles[i - j].color;
-        }
-        if (seq === rawPattern) {
-          isMatch = true;
+
+        if (isMatch) {
+          matchedPatternData = pd;
+          break; // O primeiro que der match ganha a prioridade (Simulando 1 trade por vez)
         }
       }
 
-      if (isMatch) {
+      if (matchedPatternData) {
+        const rawPattern = matchedPatternData.rawPattern;
+        const entry = matchedPatternData.entry.split(' ')[0];
+        const isExhaustion = matchedPatternData.pattern.includes('Exaustão') || matchedPatternData.pattern.includes('Continuidade');
+        const localK = rawPattern ? rawPattern.length : 1;
+        
         const idxSignal = i;
         const targetColor = entry === 'CALL' ? 'G' : 'R';
         
@@ -344,7 +373,7 @@ const Backtester = (() => {
 
         simOps.push({
           time: dateTimeStr,
-          pattern: activeData.pattern.split(' [')[0],
+          pattern: matchedPatternData.pattern.split(' [')[0],
           direction: entry,
           result: opResult,
           info: opInfo,
@@ -372,7 +401,7 @@ const Backtester = (() => {
 
         // Evitar reconta de velas na mesma sequência contínua (exaustão/continuidade)
         if (isExhaustion) {
-          const minNextIdx = idxSignal + K - 1;
+          const minNextIdx = idxSignal + localK - 1;
           if (i < minNextIdx) {
             i = minNextIdx;
           }
@@ -496,7 +525,8 @@ const Backtester = (() => {
 
   return {
     init,
-    open
+    open,
+    openAll
   };
 })();
 

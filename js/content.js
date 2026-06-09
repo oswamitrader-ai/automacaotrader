@@ -5,11 +5,25 @@
 console.log("[BinaryOps Content Script] Iniciado na página:", window.location.hostname);
 
 // =========================================================================
-// O script de interceptação do WebSocket (MAIN World) agora roda como
-// arquivo separado (js/injected.js) registrado no manifest.json com
-// "world": "MAIN". Isso contorna a Content Security Policy da corretora
-// que bloqueava a injeção inline via <script> tag.
+// O script de interceptação do WebSocket (MAIN World) é registrado no manifest.json
+// mas também usamos um fallback de injeção inline para garantir a compatibilidade
+// caso o navegador atrase o carregamento do manifest.
 // =========================================================================
+
+function injectMainScript() {
+  try {
+    const script = document.createElement('script');
+    script.src = chrome.runtime.getURL('js/injected.js');
+    script.onload = function() {
+      this.remove();
+    };
+    (document.head || document.documentElement).appendChild(script);
+    console.log("[BinaryOps Content] Fallback de injeção de script executado.");
+  } catch (e) {
+    console.warn("[BinaryOps Content] Falha no fallback de injeção:", e);
+  }
+}
+injectMainScript();
 
 // =========================================================================
 // CONTENT SCRIPT (ISOLATED World) - Comunicação via postMessage
@@ -312,6 +326,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Função para simular clique de trading
 async function executeTradingOrder(direction, amount) {
   const sel = SELECTORS[broker] || SELECTORS.exnova; // Fallback para Exnova
+  const amountEl = document.querySelector(sel.amountInput);
   console.log("[BinaryOps] Ordem usando o valor atual do painel da corretora.");
   
   // Nível 0: Tentativa via Coordenadas Calibradas (A arma definitiva contra Canvas)

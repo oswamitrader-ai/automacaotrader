@@ -50,7 +50,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["js/content.js", "css/style.css"],
+      "resources": ["js/content.js", "css/style.css", "js/injected.js"],
       "matches": ["<all_urls>"]
     }
   ]

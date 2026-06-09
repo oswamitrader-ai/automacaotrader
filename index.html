@@ -14,6 +14,76 @@
 <!-- Toast Container -->
 <div id="toastContainer" class="toast-container"></div>
 
+<!-- Operation Modal -->
+<div class="modal-overlay" id="operationModal">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modalTitle">Nova Operação</h2>
+      <button class="modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <form id="operationForm">
+        <div style="display:flex; gap:10px; margin-bottom:15px;">
+          <div style="flex:1;">
+            <label class="form-label">Ativo/Par</label>
+            <select class="form-select" id="opPair" required></select>
+          </div>
+          <div style="flex:1;">
+            <label class="form-label">Direção</label>
+            <select class="form-select" id="opDirection" required>
+              <option value="CALL">▲ CALL (Acima)</option>
+              <option value="PUT">▼ PUT (Abaixo)</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex; gap:10px; margin-bottom:15px;">
+          <div style="flex:1;">
+            <label class="form-label">Valor da Entrada</label>
+            <input type="number" class="form-input" id="opAmount" step="0.01" min="1" required>
+          </div>
+          <div style="flex:1;">
+            <label class="form-label">Payout (%)</label>
+            <input type="number" class="form-input" id="opPayout" step="0.1" min="1" max="1000" required>
+          </div>
+        </div>
+        <div style="margin-bottom:15px;">
+          <label class="form-label">Resultado</label>
+          <div style="display:flex; gap:10px;">
+            <label style="flex:1; text-align:center; padding:10px; background:rgba(0,255,136,0.1); border:1px solid #00ff88; border-radius:4px; cursor:pointer;">
+              <input type="radio" name="opResult" value="WIN" required> WIN
+            </label>
+            <label style="flex:1; text-align:center; padding:10px; background:rgba(255,51,102,0.1); border:1px solid #ff3366; border-radius:4px; cursor:pointer;">
+              <input type="radio" name="opResult" value="LOSS" required> LOSS
+            </label>
+            <label style="flex:1; text-align:center; padding:10px; background:rgba(255,215,0,0.1); border:1px solid #ffd700; border-radius:4px; cursor:pointer;">
+              <input type="radio" name="opResult" value="DRAW" required> EMPATE
+            </label>
+          </div>
+        </div>
+        <div style="display:flex; gap:10px; margin-bottom:15px;">
+          <div style="flex:1;">
+            <label class="form-label">Data e Hora</label>
+            <input type="datetime-local" class="form-input" id="opDate" required>
+          </div>
+          <div style="flex:1;">
+            <label class="form-label">Timeframe (Opcional)</label>
+            <select class="form-select" id="opTimeframe"></select>
+          </div>
+        </div>
+        <div style="margin-bottom:15px;">
+          <label class="form-label">Estratégia (Opcional)</label>
+          <input type="text" class="form-input" id="opStrategy" placeholder="Ex: MHI, Suporte/Resistência">
+        </div>
+        <div style="margin-bottom:20px;">
+          <label class="form-label">Anotações (Opcional)</label>
+          <textarea class="form-textarea" id="opNotes" rows="2" placeholder="O que você observou no mercado?"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary" id="btnSubmitOp" style="width:100%;">💾 Salvar</button>
+      </form>
+    </div>
+  </div>
+</div>
+
 <!-- Mobile Toggle -->
 <button id="mobileToggle" class="mobile-toggle">☰</button>
 
@@ -59,15 +129,32 @@
 
     <nav class="sidebar-nav">
       <div class="nav-section-title">Principal</div>
-      <a class="nav-item active" data-page="bot">
+      <a class="nav-item active" data-page="dashboard">
+        <span class="nav-icon">📊</span> Dashboard
+      </a>
+      <a class="nav-item" data-page="bot">
         <span class="nav-icon">🤖</span> Robô
       </a>
       <a class="nav-item" data-page="cataloger">
         <span class="nav-icon">🔍</span> Catalogador
       </a>
 
+      <div class="nav-section-title">Gestão e Análise</div>
+      <a class="nav-item" data-page="operations">
+        <span class="nav-icon">📋</span> Operações
+      </a>
+      <a class="nav-item" data-page="analysis">
+        <span class="nav-icon">🔬</span> Análise
+      </a>
+      <a class="nav-item" data-page="goals">
+        <span class="nav-icon">🎯</span> Metas
+      </a>
+
       <div class="nav-section-title">Sistema</div>
-      <a class="nav-item" id="btnLogout" style="color: var(--neon-red); margin-top: 20px;">
+      <a class="nav-item" data-page="settings">
+        <span class="nav-icon">⚙️</span> Configurações
+      </a>
+      <a class="nav-item" id="btnLogout" style="color: var(--neon-red);">
         <span class="nav-icon">🚪</span> Sair
       </a>
     </nav>
@@ -76,7 +163,7 @@
       <div class="bank-info">
         <div class="bank-label" id="navUserName">Usuário</div>
       </div>
-      <div class="bank-info" style="margin-top: 10px;">
+      <div class="bank-info">
         <div class="bank-label">Saldo da Banca</div>
         <div class="bank-value" id="sidebarBank">R$ 0.00</div>
       </div>
@@ -88,11 +175,392 @@
 
     <!-- Header -->
     <div class="page-header">
-      <h1 class="page-title" id="pageTitle">🤖 <span>Robô de Automação</span></h1>
+      <h1 class="page-title" id="pageTitle">📊 <span>Dashboard</span></h1>
     </div>
 
+    <!-- ==================== DASHBOARD PAGE ==================== -->
+    <section id="page-dashboard" class="page-section active">
+      <div class="metrics-grid">
+        <div class="metric-card primary">
+          <div class="metric-title">Banca Atual</div>
+          <div class="metric-value" id="metricCurrentBank">R$ 0.00</div>
+        </div>
+        <div class="metric-card green">
+          <div class="metric-title">Lucro Líquido</div>
+          <div class="metric-value" id="metricNetProfit">R$ 0.00</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-title">Win Rate</div>
+          <div class="metric-value" id="metricWinRate">0%</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-title">Total de Operações</div>
+          <div class="metric-value" id="metricTotalOps">0</div>
+        </div>
+      </div>
+
+      <div class="metrics-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-top: 15px;">
+        <div class="metric-card" style="padding: 10px;">
+          <div class="metric-title" style="font-size:0.75rem;">Wins</div>
+          <div class="metric-value" id="metricWins" style="font-size:1.2rem; color:var(--neon-green)">0</div>
+        </div>
+        <div class="metric-card" style="padding: 10px;">
+          <div class="metric-title" style="font-size:0.75rem;">Losses</div>
+          <div class="metric-value" id="metricLosses" style="font-size:1.2rem; color:var(--neon-red)">0</div>
+        </div>
+        <div class="metric-card" style="padding: 10px;">
+          <div class="metric-title" style="font-size:0.75rem;">Max Win Streak</div>
+          <div class="metric-value" id="metricMaxWinStreak" style="font-size:1.2rem; color:var(--neon-green)">0</div>
+        </div>
+        <div class="metric-card" style="padding: 10px;">
+          <div class="metric-title" style="font-size:0.75rem;">Max Loss Streak</div>
+          <div class="metric-value" id="metricMaxLossStreak" style="font-size:1.2rem; color:var(--neon-red)">0</div>
+        </div>
+      </div>
+
+      <!-- Gráficos -->
+      <div style="display: flex; gap: 15px; margin-top: 20px; flex-wrap: wrap;">
+        <!-- Gráfico Evolução -->
+        <div class="card" style="flex: 2; min-width: 300px;">
+          <h3 style="font-size: 0.9rem; margin-bottom: 15px; color: var(--text-secondary);">Evolução do Saldo</h3>
+          <div style="position: relative; height: 250px;">
+            <canvas id="balanceChart"></canvas>
+          </div>
+        </div>
+        
+        <!-- Gráfico Pizza -->
+        <div class="card" style="flex: 1; min-width: 200px;">
+          <h3 style="font-size: 0.9rem; margin-bottom: 15px; color: var(--text-secondary);">Win / Loss / Empate</h3>
+          <div style="position: relative; height: 250px;">
+            <canvas id="winLossChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Diário e Quick Stats -->
+      <div style="display: flex; gap: 15px; margin-top: 20px; flex-wrap: wrap;">
+        <div class="card" style="flex: 2; min-width: 300px;">
+          <h3 style="font-size: 0.9rem; margin-bottom: 15px; color: var(--text-secondary);">Resultados Diários</h3>
+          <div style="position: relative; height: 250px;">
+            <canvas id="dailyChart"></canvas>
+          </div>
+        </div>
+        
+        <div class="card" style="flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 10px;">
+          <h3 style="font-size: 0.9rem; margin-bottom: 5px; color: var(--text-secondary);">Resumo de Hoje</h3>
+          
+          <div style="display:flex; justify-content:space-between; padding:10px; background:var(--bg-color); border-radius:8px;">
+            <span style="font-size:0.8rem; color:var(--text-secondary);">Operações Hoje:</span>
+            <span id="qsTodayOps" style="font-weight:bold;">0</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; padding:10px; background:var(--bg-color); border-radius:8px;">
+            <span style="font-size:0.8rem; color:var(--text-secondary);">Lucro Hoje:</span>
+            <span id="qsTodayProfit" style="font-weight:bold;">R$ 0.00</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; padding:10px; background:var(--bg-color); border-radius:8px;">
+            <span style="font-size:0.8rem; color:var(--text-secondary);">Profit Factor Geral:</span>
+            <span id="qsProfitFactor" style="font-weight:bold; color:var(--neon-cyan)">0.00</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; padding:10px; background:var(--bg-color); border-radius:8px;">
+            <span style="font-size:0.8rem; color:var(--text-secondary);">ROI:</span>
+            <span id="qsROI" style="font-weight:bold; color:var(--neon-purple)">0.0%</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== OPERATIONS PAGE ==================== -->
+    <section id="page-operations" class="page-section">
+      <div class="card" style="margin-bottom: 20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <h3 style="font-size: 1rem; color: var(--neon-cyan);">Histórico de Operações</h3>
+          <button class="btn btn-primary" id="btnNewOp">➕ Nova Operação</button>
+        </div>
+        
+        <!-- Filtros -->
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:15px; padding-top:15px; border-top:1px solid var(--border-color);">
+          <div style="flex:1; min-width:120px;">
+            <label class="form-label" style="font-size:0.75rem;">De</label>
+            <input type="date" class="form-input" id="filterDateFrom">
+          </div>
+          <div style="flex:1; min-width:120px;">
+            <label class="form-label" style="font-size:0.75rem;">Até</label>
+            <input type="date" class="form-input" id="filterDateTo">
+          </div>
+          <div style="flex:1; min-width:100px;">
+            <label class="form-label" style="font-size:0.75rem;">Ativo</label>
+            <select class="form-select" id="filterPair"><option value="all">Todos</option></select>
+          </div>
+          <div style="flex:1; min-width:100px;">
+            <label class="form-label" style="font-size:0.75rem;">Direção</label>
+            <select class="form-select" id="filterDirection">
+              <option value="all">Todas</option>
+              <option value="CALL">CALL (Acima)</option>
+              <option value="PUT">PUT (Abaixo)</option>
+            </select>
+          </div>
+          <div style="flex:1; min-width:100px;">
+            <label class="form-label" style="font-size:0.75rem;">Resultado</label>
+            <select class="form-select" id="filterResult">
+              <option value="all">Todos</option>
+              <option value="WIN">WIN</option>
+              <option value="LOSS">LOSS</option>
+              <option value="DRAW">EMPATE</option>
+            </select>
+          </div>
+          <div style="flex:1; min-width:120px;">
+            <label class="form-label" style="font-size:0.75rem;">Estratégia</label>
+            <select class="form-select" id="filterStrategy"><option value="all">Todas</option></select>
+          </div>
+          <div style="display:flex; align-items:flex-end;">
+            <button class="btn btn-outline" id="btnClearFilters" style="height:42px;">Limpar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <div style="padding:10px; font-size:0.8rem; color:var(--text-secondary);" id="tableCount">0 operação(ões)</div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Data/Hora</th>
+              <th>Par/Ativo</th>
+              <th>Direção</th>
+              <th>Valor Entrada</th>
+              <th>Payout</th>
+              <th>Resultado</th>
+              <th>P/L</th>
+              <th>Timeframe</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="operationsTableBody">
+            <!-- Renderizado via JS -->
+          </tbody>
+        </table>
+        <div id="tablePagination" style="display:flex; justify-content:center; gap:5px; padding:15px 0;"></div>
+      </div>
+    </section>
+
+    <!-- ==================== ANALYSIS PAGE ==================== -->
+    <section id="page-analysis" class="page-section">
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:20px;">
+        
+        <div class="card">
+          <h3 style="font-size:0.9rem; color:var(--neon-cyan); margin-bottom:15px;">Melhores / Piores Ativos</h3>
+          <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+            <span style="font-size:0.85rem; color:var(--text-secondary);">Mais Lucrativo:</span>
+            <span><strong id="bestPair" style="color:var(--text-primary);">-</strong> (<span id="bestPairProfit">-</span>)</span>
+          </div>
+          <div style="display:flex; justify-content:space-between;">
+            <span style="font-size:0.85rem; color:var(--text-secondary);">Menos Lucrativo:</span>
+            <span><strong id="worstPair" style="color:var(--text-primary);">-</strong> (<span id="worstPairProfit">-</span>)</span>
+          </div>
+          <hr style="border:0; border-top:1px solid var(--border-color); margin:15px 0;">
+          <h3 style="font-size:0.9rem; color:var(--neon-cyan); margin-bottom:15px;">Lucratividade por Ativo</h3>
+          <div style="height: 250px; position:relative;"><canvas id="pairChart"></canvas></div>
+        </div>
+
+        <div class="card">
+          <h3 style="font-size:0.9rem; color:var(--neon-purple); margin-bottom:15px;">Melhores / Piores Horários</h3>
+          <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+            <span style="font-size:0.85rem; color:var(--text-secondary);">Melhor Horário:</span>
+            <span><strong id="bestHour" style="color:var(--text-primary);">-</strong> (<span id="bestHourProfit">-</span>)</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+            <span style="font-size:0.85rem; color:var(--text-secondary);">Pior Horário:</span>
+            <span><strong id="worstHour" style="color:var(--text-primary);">-</strong> (<span id="worstHourProfit">-</span>)</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+            <span style="font-size:0.85rem; color:var(--text-secondary);">Melhor Dia:</span>
+            <span><strong id="bestDay" style="color:var(--text-primary);">-</strong> (<span id="bestDayProfit">-</span>)</span>
+          </div>
+          <div style="display:flex; justify-content:space-between;">
+            <span style="font-size:0.85rem; color:var(--text-secondary);">Pior Dia:</span>
+            <span><strong id="worstDay" style="color:var(--text-primary);">-</strong> (<span id="worstDayProfit">-</span>)</span>
+          </div>
+          <hr style="border:0; border-top:1px solid var(--border-color); margin:15px 0;">
+          <h3 style="font-size:0.9rem; color:var(--neon-purple); margin-bottom:15px;">Lucratividade por Hora do Dia</h3>
+          <div style="height: 200px; position:relative;"><canvas id="hourChart"></canvas></div>
+        </div>
+
+        <div class="card">
+          <h3 style="font-size:0.9rem; color:var(--neon-green); margin-bottom:15px;">Métricas Avançadas de Risco</h3>
+          
+          <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--border-color);">
+            <span style="font-size:0.8rem; color:var(--text-secondary);">Profit Factor:</span>
+            <strong id="analysisProfitFactor">-</strong>
+          </div>
+          <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--border-color);">
+            <span style="font-size:0.8rem; color:var(--text-secondary);">Payoff Ratio:</span>
+            <strong id="analysisPayoffRatio">-</strong>
+          </div>
+          <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--border-color);">
+            <span style="font-size:0.8rem; color:var(--text-secondary);">Expectância Matemática:</span>
+            <strong id="analysisExpectancy">-</strong>
+          </div>
+          <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--border-color);">
+            <span style="font-size:0.8rem; color:var(--text-secondary);">Média de Lucro (Win):</span>
+            <strong id="analysisAvgWin" class="text-green">-</strong>
+          </div>
+          <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--border-color);">
+            <span style="font-size:0.8rem; color:var(--text-secondary);">Média de Perda (Loss):</span>
+            <strong id="analysisAvgLoss" class="text-red">-</strong>
+          </div>
+          <div style="display:flex; justify-content:space-between; padding:8px 0;">
+            <span style="font-size:0.8rem; color:var(--text-secondary);">ROI Sobre Banca:</span>
+            <strong id="analysisROI">-</strong>
+          </div>
+
+          <h3 style="font-size:0.9rem; color:var(--neon-cyan); margin:20px 0 10px 0;">Simulador de Saque</h3>
+          <div style="background:var(--bg-color); border:1px solid var(--border-color); border-radius:8px; padding:15px;" id="withdrawResult">
+            <!-- Renderizado via JS -->
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ==================== GOALS PAGE ==================== -->
+    <section id="page-goals" class="page-section">
+      <div id="goalsAlerts" style="margin-bottom:20px;"></div>
+
+      <div style="display:flex; gap:20px; flex-wrap:wrap;">
+        <div class="card" style="flex:1; min-width:300px;">
+          <h3 style="font-size:1rem; margin-bottom:15px; color:var(--neon-cyan);">Painel de Gestão e Limites</h3>
+          
+          <div style="display:flex; gap:10px; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+            <button class="btn btn-outline goals-tab active" data-period="daily">Diário</button>
+            <button class="btn btn-outline goals-tab" data-period="weekly">Semanal</button>
+            <button class="btn btn-outline goals-tab" data-period="monthly">Mensal</button>
+          </div>
+
+          <!-- Daily Tab -->
+          <div id="goals-daily" class="goals-period-content active">
+            <div style="display:flex; justify-content:space-between; background:var(--bg-color); border-radius:8px; padding:10px; margin-bottom:20px;" id="goalsSummaryDaily"></div>
+            <div style="display:grid; grid-template-columns: 1fr; gap:15px;" id="goalsCardsDaily"></div>
+          </div>
+          <!-- Weekly Tab -->
+          <div id="goals-weekly" class="goals-period-content" style="display:none;">
+            <div style="display:flex; justify-content:space-between; background:var(--bg-color); border-radius:8px; padding:10px; margin-bottom:20px;" id="goalsSummaryWeekly"></div>
+            <div style="display:grid; grid-template-columns: 1fr; gap:15px;" id="goalsCardsWeekly"></div>
+          </div>
+          <!-- Monthly Tab -->
+          <div id="goals-monthly" class="goals-period-content" style="display:none;">
+            <div style="display:flex; justify-content:space-between; background:var(--bg-color); border-radius:8px; padding:10px; margin-bottom:20px;" id="goalsSummaryMonthly"></div>
+            <div style="display:grid; grid-template-columns: 1fr; gap:15px;" id="goalsCardsMonthly"></div>
+          </div>
+        </div>
+
+        <div class="card" style="flex:1; min-width:300px;">
+          <h3 style="font-size:1rem; margin-bottom:15px; color:var(--neon-purple);">Configurar Metas e Limites</h3>
+          <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:20px;">Defina limites para o seu operacional. O sistema emitirá alertas visuais caso você esteja próximo de atingir limites de prejuízo ou bater metas.</p>
+          
+          <form id="goalsForm">
+            <h4 style="font-size:0.85rem; color:var(--text-primary); margin-bottom:10px;">Metas Diárias</h4>
+            <div style="display:flex; gap:10px; margin-bottom:15px;">
+              <div style="flex:1;">
+                <label class="form-label" style="font-size:0.75rem;">Meta de Lucro</label>
+                <input type="number" class="form-input" id="goalDailyProfit" min="0">
+              </div>
+              <div style="flex:1;">
+                <label class="form-label" style="font-size:0.75rem;">Stop Loss Máximo</label>
+                <input type="number" class="form-input" id="goalDailyLoss" min="0">
+              </div>
+            </div>
+            <div style="display:flex; gap:10px; margin-bottom:20px;">
+              <div style="flex:1;">
+                <label class="form-label" style="font-size:0.75rem;">Max Operações</label>
+                <input type="number" class="form-input" id="goalDailyOps" min="0">
+              </div>
+              <div style="flex:1;">
+                <label class="form-label" style="font-size:0.75rem;">Min Win Rate (%)</label>
+                <input type="number" class="form-input" id="goalDailyWinRate" min="0" max="100">
+              </div>
+            </div>
+
+            <hr style="border:0; border-top:1px dashed var(--border-color); margin:20px 0;">
+            
+            <h4 style="font-size:0.85rem; color:var(--text-primary); margin-bottom:10px;">Metas Semanais</h4>
+            <div style="display:flex; gap:10px; margin-bottom:15px;">
+              <div style="flex:1;">
+                <label class="form-label" style="font-size:0.75rem;">Meta de Lucro</label>
+                <input type="number" class="form-input" id="goalWeeklyProfit" min="0">
+              </div>
+              <div style="flex:1;">
+                <label class="form-label" style="font-size:0.75rem;">Stop Loss Máximo</label>
+                <input type="number" class="form-input" id="goalWeeklyLoss" min="0">
+              </div>
+            </div>
+            
+            <div style="display:none;">
+              <!-- Ocultos para nao poluir, o js precisa -->
+              <input type="number" id="goalWeeklyOps"> <input type="number" id="goalWeeklyWinRate">
+              <input type="number" id="goalMonthlyProfit"> <input type="number" id="goalMonthlyLoss">
+              <input type="number" id="goalMonthlyOps"> <input type="number" id="goalMonthlyWinRate">
+              <input type="number" id="goalYearlyProfit"> <input type="number" id="goalYearlyLoss">
+              <input type="number" id="goalYearlyOps"> <input type="number" id="goalYearlyWinRate">
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="width:100%; margin-top:15px;">💾 Salvar Metas e Limites</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== SETTINGS PAGE ==================== -->
+    <section id="page-settings" class="page-section">
+      <div style="display:flex; gap:20px; flex-wrap:wrap;">
+        
+        <div class="card" style="flex:1; min-width:300px;">
+          <h3 style="font-size:1rem; margin-bottom:15px; color:var(--neon-cyan);">⚙️ Parâmetros Financeiros</h3>
+          <form id="settingsForm">
+            <div class="form-group">
+              <label class="form-label">Moeda Principal</label>
+              <select class="form-select" id="setCurrency">
+                <option value="BRL">BRL (R$)</option>
+                <option value="USD">USD ($)</option>
+                <option value="EUR">EUR (€)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Banca Inicial</label>
+              <input type="number" class="form-input" id="setInitialBank" step="0.01" min="0">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Taxa de Saque (%) - Corretora</label>
+              <input type="number" class="form-input" id="setWithdrawFee" step="0.1" min="0" max="100" value="0">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Payout Padrão Automático (%)</label>
+              <input type="number" class="form-input" id="setDefaultPayout" step="1" min="0" max="100" value="85">
+            </div>
+            
+            <button type="submit" class="btn btn-primary" style="width:100%; margin-top:15px;">💾 Salvar Preferências</button>
+          </form>
+        </div>
+
+        <div class="card" style="flex:1; min-width:300px;">
+          <h3 style="font-size:1rem; margin-bottom:15px; color:var(--neon-purple);">💾 Backup e Banco de Dados</h3>
+          <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:20px;">Suas operações ficam salvas no navegador localmente. Para não perder os dados caso limpe o cache, faça o backup periodicamente.</p>
+          
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            <button type="button" class="btn btn-outline" id="btnExportJSON">📥 Exportar Backup Completo (.JSON)</button>
+            <button type="button" class="btn btn-outline" id="btnImportJSON">📤 Importar Backup (.JSON)</button>
+            <button type="button" class="btn btn-outline" id="btnExportCSV">📊 Exportar para Excel/Planilha (.CSV)</button>
+          </div>
+
+          <hr style="border:0; border-top:1px dashed var(--border-color); margin:20px 0;">
+          
+          <h4 style="font-size:0.85rem; color:var(--neon-red); margin-bottom:10px;">Zona de Risco</h4>
+          <button type="button" class="btn btn-danger" id="btnClearAll" style="width:100%;">🗑️ Apagar TODAS as Operações</button>
+        </div>
+
+      </div>
+    </section>
+
     <!-- ==================== ROBOT PAGE ==================== -->
-    <section id="page-bot" class="page-section active">
+    <section id="page-bot" class="page-section">
       <div class="bot-grid">
         
         <!-- Coluna de Configuração -->
@@ -565,7 +1033,10 @@ C3: 25, 55"></textarea>
           <div class="table-container" style="display: none; margin-top: 20px; border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: var(--spacing-md); background: rgba(0, 0, 0, 0.15);" id="catalogerResultsContainer">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px; padding: 0 10px;">
               <h3 style="font-size: 1.1rem; color: var(--neon-cyan)" id="catalogerResultsTitle">Melhores Padrões Encontrados</h3>
-              <button class="btn btn-success btn-sm" id="btnExportSignals">📥 Enviar para Robô</button>
+              <div style="display:flex; gap: 10px;">
+                <button class="btn btn-outline btn-sm" id="btnTestAllSignals" style="border-color: var(--neon-cyan); color: var(--neon-cyan);">📈 Testar Todos</button>
+                <button class="btn btn-success btn-sm" id="btnExportSignals">📥 Enviar para Robô</button>
+              </div>
             </div>
             <table class="data-table" id="catalogerTable">
               <thead>

@@ -26,3 +26,14 @@ Este projeto consiste em um Dashboard de Opções Binárias que se comunica via 
 
 ## Próximos Passos
 - Validar as taxas de acertos de exaustão no mercado real e a exportação direta para o robô.
+
+## Bugs Corrigidos
+- **Redeclaração fatal no `injected.js`**: As variáveis `const balances` e `let userBalanceId` estavam declaradas duas vezes no mesmo escopo (linhas ~214 e ~305), causando `SyntaxError` que matava toda a IIFE do interceptador. Isso impedia a interceptação de WebSockets (`window.__binaryOps_ws` nunca era populado), quebrando o catalogador e a busca de velas. Correção: removido o bloco duplicado (linhas 304-311).
+- **ReferenceError no fallback DOM do `content.js`**: A variável `amountEl` era passada como argumento para `findButtonByKeywords` nas linhas ~347 e ~349 dentro de `executeTradingOrder`, mas não estava declarada no escopo desta função. Correção: declarada e inicializada com `document.querySelector(sel.amountInput)` no início de `executeTradingOrder`.
+
+## ⚠️ Regras de Proteção do Código (NUNCA VIOLAR)
+1. **`injected.js` é crítico**: Toda a lógica roda dentro de uma IIFE `(() => { ... })()`. Qualquer erro de sintaxe (como redeclaração de `const`/`let`) mata o script inteiro, impedindo interceptação de WebSockets, mapeamento de IDs e roubo de velas. **Sempre verificar escopo antes de declarar variáveis.**
+2. **Nunca redeclarar `const` ou `let` no mesmo escopo** em nenhum arquivo do projeto. Usar nomes diferentes ou reutilizar a variável existente.
+3. **Overlays e Notificações Push são intocáveis**: Nunca fazer alterações no app do entregador que afetem o funcionamento dos overlays e das notificações push.
+4. **Testar o `injected.js` após qualquer alteração**: Verificar no console da corretora (F12) que `[BinaryOps Interceptor] Script MAIN world carregado.` aparece sem erros.
+5. **O `window.__binaryOps_ws` deve sempre ser populado**: Se este Set estiver vazio, o catalogador, o robô e as ordens via WS falham. Nunca alterar o fluxo de `window.WebSocket = function(...)` sem garantir que o Set continua sendo preenchido.

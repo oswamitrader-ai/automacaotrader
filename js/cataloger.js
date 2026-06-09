@@ -21,7 +21,8 @@ const Cataloger = (() => {
 
   let bestSignalsFound = []; // Array of { timeStr, pair, direction, timeframe }
   let bestPatternsFound = []; // Array of { rawPattern, pair, direction, timeframe }
-  let lastFetchedCandles = []; // Guardará o histórico das últimas velas carregadas
+  let lastFetchedCandles = [];
+  let lastCatalogerResults = []; // Guardará o histórico das últimas velas carregadas
 
   function updateRecommendation(e) {
     const timeframe = document.getElementById('catTimeframe')?.value || '1m';
@@ -130,9 +131,8 @@ const Cataloger = (() => {
       }
     });
 
-    document.getElementById('btnExportSignals')?.addEventListener('click', () => {
-      exportToBotSignals();
-    });
+    document.getElementById('btnExportSignals')?.addEventListener('click', exportToBotSignals);
+    document.getElementById('btnTestAllSignals')?.addEventListener('click', testAllSignals);
   }
 
   async function fetchHistoricalCandles(pair, timeframe) {
@@ -561,6 +561,8 @@ const Cataloger = (() => {
     }
 
     tbody.innerHTML = '';
+    
+    lastCatalogerResults = results;
 
     if (results.length === 0) {
       tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted)">Nenhum padrão acima de ${minWinRate}% de win rate encontrado nas últimas ${limit} velas.</td></tr>`;
@@ -679,6 +681,40 @@ const Cataloger = (() => {
         document.querySelector('.nav-item[data-page="bot"]').click();
       }
     }
+  }
+
+  function testAllSignals() {
+    if (lastCatalogerResults.length === 0) {
+      UI.showToast('Nenhum resultado para testar.', 'warning');
+      return;
+    }
+
+    const pair = document.getElementById('catPair').value;
+    const payout = parseInt(document.getElementById('botMinPayout')?.value) || 80;
+
+    const allPatternsData = lastCatalogerResults.map(res => {
+      let patternToTest = res.rawPattern;
+      if (!patternToTest) {
+        if (res.rawMinute) {
+          patternToTest = res.rawMinute;
+        } else if (res.pattern.includes('Após sequência')) {
+          patternToTest = res.pattern.replace('Após sequência: ', '').replace(/🟩/g, 'G').replace(/🟥/g, 'R');
+        } else if (res.pattern.includes('Exaustão') || res.pattern.includes('Continuidade')) {
+          const cleanColors = res.pattern.split(': ')[1].split(' ')[0];
+          patternToTest = cleanColors.replace(/🟩/g, 'G').replace(/🟥/g, 'R');
+        }
+      }
+      return {
+        pattern: res.pattern,
+        rawPattern: patternToTest,
+        entry: res.entry,
+        timeframe: res.timeframe,
+        pair: pair,
+        payout: payout
+      };
+    });
+
+    Backtester.openAll(allPatternsData, lastFetchedCandles, pair);
   }
 
   return { init };

@@ -301,15 +301,6 @@
     const dir = direction.toUpperCase() === 'CALL' ? 'call' : 'put';
     const wsRequestId = 'bo_order_' + Math.floor(Math.random() * 1000000);
 
-    // Calcular ID do Saldo da Conta (Demo vs Real)
-    const balances = window.__binaryOps_balances || {};
-    let userBalanceId = 0;
-    if (accountType === 'real' && balances.real) {
-      userBalanceId = balances.real;
-    } else if (balances.demo) {
-      userBalanceId = balances.demo;
-    }
-
     // Formato da API IQ Option / Exnova para abrir opção binária
     const orderMsg = {
       name: "sendMessage",
