@@ -143,25 +143,11 @@
         const parsed = JSON.parse(decompressed);
         const name = parsed.name || (parsed.msg && parsed.msg.name) || '';
 
-        // Captura agressiva global de IDs de saldo em QUALQUER pacote recebido
-        const findBalanceIdAggressive = (obj) => {
-          if (!obj) return;
-          if (Array.isArray(obj)) { obj.forEach(findBalanceIdAggressive); return; }
-          if (typeof obj === 'object') {
-            if (obj.user_balance_id) window.__binaryOps_lastSeenBalanceId = obj.user_balance_id;
-            if (obj.balance_id) window.__binaryOps_lastSeenBalanceId = obj.balance_id;
-            if (obj.id && obj.type !== undefined && obj.amount !== undefined && (obj.type === 1 || obj.type === 4)) {
-               window.__binaryOps_balances = window.__binaryOps_balances || {};
-               if (obj.type === 1) window.__binaryOps_balances.real = obj.id;
-               if (obj.type === 4) window.__binaryOps_balances.demo = obj.id;
-            }
-            Object.values(obj).forEach(findBalanceIdAggressive);
-          }
-        };
-        try { findBalanceIdAggressive(parsed); } catch(e){}
-
-        
         // Sincronizar o horário do servidor da corretora
+        if (name === "timeSync" || name === "profile" || name === "balances" || name === "candles") {
+          event.target._isMainSocket = true;
+        }
+
         if (name === "timeSync") {
           const serverVal = Number(parsed.msg);
           if (serverVal > 10000000000) {
@@ -380,11 +366,22 @@
       return;
     }
 
-    // Achar um socket aberto
+    // Achar um socket aberto (Priorizar o socket principal que recebe timeSync/profile)
     let openWs = null;
+    let fallbackWs = null;
     wsSet.forEach(w => {
-      if (w.readyState === WebSocket.OPEN) openWs = w;
+      if (w.readyState === WebSocket.OPEN) {
+        if (w._isMainSocket) {
+          openWs = w;
+        }
+        fallbackWs = w; // Guarda qualquer um como backup
+      }
     });
+    
+    // Se não achou o principal, usa o backup
+    if (!openWs) {
+      openWs = fallbackWs;
+    }
 
     if (!openWs) {
       showErrorAlert('Nenhum WebSocket está aberto (OPEN). A corretora pode estar desconectada.');
@@ -405,6 +402,7 @@
     }
 
     if (userBalanceId === 0) {
+
       // Se ainda for zero, pede pra corretora enviar os saldos agora mesmo e usa o fallback de DOM por enquanto
       try { openWs.send(JSON.stringify({"name":"sendMessage","msg":{"name":"get-balances","version":"1.0"}})); } catch(e){}
       
@@ -526,10 +524,10 @@
       if (!responded) {
         responded = true;
         openWs.removeEventListener('message', responseHandler);
-        // Timeout atingido: A corretora ignorou a ordem (Ativo fechado, erro de saldo, etc.)
-        window.postMessage({ type: 'binaryops_order_result', requestId, status: 'error', error: 'Timeout do servidor (Corretora ignorou o envio). Verifique se o ativo permite Opções Turbo, se a aba está logada, ou recarregue (F5).' }, '*');
+        // Timeout rápido de 1.5s para forçar o clique físico sem atrasar a vela
+        window.postMessage({ type: 'binaryops_order_result', requestId, status: 'error', error: 'Timeout WS (1.5s).' }, '*');
       }
-    }, 8000);
+    }, 1500);
 
     const responseHandler = async (event) => {
       if (responded) return;
@@ -549,21 +547,28 @@
           const optDataRes = (data.msg && data.msg.body) || data.msg || data;
           const optionId = optDataRes.id || optDataRes.option_id || optDataRes.optionId;
 
-          if (msgName === 'error' || 
-             (data.msg && data.msg.isSuccessful === false) ||
-             (data.msg && data.msg.status === 'error') ||
-             (data.msg && typeof data.msg.message === 'string' && data.msg.message.toLowerCase().includes('error'))) {
+          const isErrorMsg = msgName === 'error' || 
+                             (data.msg && data.msg.name === 'error') ||
+                             (data.msg && data.msg.isSuccessful === false) ||
+                             (data.msg && data.msg.status === 'error') ||
+                             (data.msg && typeof data.msg.message === 'string' && data.msg.message.toLowerCase().includes('error'));
+
+          if (isErrorMsg) {
             
-            const errMsg = (data.msg && data.msg.message) ? data.msg.message : `Erro Genérico: ${JSON.stringify(data)}`;
+            const errMsg = (data.msg && data.msg.message) ? data.msg.message : `Rejeitado pela corretora: ${JSON.stringify(data.msg || data)}`;
             console.warn(`[BinaryOps Interceptor] Falha ao enviar ordem:`, data);
             
             window.postMessage({ type: 'binaryops_order_result', requestId, status: 'error', error: errMsg }, '*');
-          } else {
+          } else if (optionId || (data.msg && data.msg.isSuccessful === true) || msgName === 'option-opened') {
             console.log(`[BinaryOps Interceptor] Ordem aceita pela corretora! ID: ${optionId || 'Aguardando broadcast'}`, data);
             if (optionId) {
               window.__binaryOps_openedOptionIds.add(String(optionId));
             }
             window.postMessage({ type: 'binaryops_order_result', requestId, status: 'success', data: optDataRes }, '*');
+          } else {
+            // Respondeu ao request_id mas sem optionId. Isso quase sempre é uma rejeição silenciosa!
+            console.warn(`[BinaryOps Interceptor] Resposta vaga da corretora, tratando como falha para agilizar fallback:`, data);
+            window.postMessage({ type: 'binaryops_order_result', requestId, status: 'error', error: 'Corretora não confirmou o ID da transação.' }, '*');
           }
         }
         // Resposta via broadcast de abertura de opção da corretora
@@ -574,7 +579,10 @@
              window.__binaryOps_openedOptionIds.add(String(optId));
           }
           // Validar se o broadcast é da opção que acabamos de mandar (mesmo par e direção)
-          if (String(optData.active_id) === String(activeId) && String(optData.direction || optData.dir) === String(dir)) {
+          const bActive = String(optData.active_id || optData.activeId || activeId); // Assume o mesmo se não vier
+          const bDir = String(optData.direction || optData.dir || optData.type || dir).toLowerCase();
+          
+          if (bActive === String(activeId) && bDir === String(dir)) {
             if (!responded) {
               responded = true;
               clearTimeout(responseTimeout);

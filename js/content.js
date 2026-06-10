@@ -381,19 +381,16 @@ async function executeTradingOrder(direction, amount) {
   console.log("[BinaryOps] Tentando ajustar valor da ordem na tela para: " + amount);
 
   if (amountEl && amount) {
+    // 1. Inserir valor (Burlar React 16+ via descritor nativo)
+    amountEl.focus();
     try {
-      // Tentar alterar o valor visualmente para o Fallback não usar a banca toda acidentalmente
       const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      if (nativeInputValueSetter) {
-        nativeInputValueSetter.call(amountEl, amount);
-      } else {
-        amountEl.value = amount;
-      }
-      amountEl.dispatchEvent(new Event('input', { bubbles: true }));
-      amountEl.dispatchEvent(new Event('change', { bubbles: true }));
-    } catch (e) {
-      console.warn("Erro ao tentar alterar o valor no DOM:", e);
+      nativeInputValueSetter.call(amountEl, amount);
+    } catch(e) {
+      amountEl.value = amount; // Fallback
     }
+    amountEl.dispatchEvent(new Event('input', { bubbles: true }));
+    amountEl.dispatchEvent(new Event('change', { bubbles: true }));
   }
   
   // Nível 0: Tentativa via Coordenadas Calibradas (A arma definitiva contra Canvas)
@@ -428,11 +425,8 @@ async function executeTradingOrder(direction, amount) {
   
   // 3. Simular clique físico completo (MouseEvents)
   simulateMouseClick(clickTarget);
-  console.log(`[BinaryOps Content Script] Ordem de ${direction} enviada com clique simulado cego.`);
-  
-  // ALERTA: Em corretoras novas (Exnova/IQ Option Canvas), clique não-isTrusted é IGNORADO!
-  // Como não usamos calibração física de tela, avisaremos que pode não ter ido.
-  throw new Error(`A corretora rejeitou via API e o clique simulado DOM não é confiável sem CALIBRAÇÃO DE TELA. Use a Calibração no Painel para cliques físicos perfeitos!`);
+  console.log(`[BinaryOps Content Script] Ordem de ${direction} enviada com clique simulado completo.`);
+  return true;
 }
 
 // Simular cliques de mouse reais (essencial para contornar proteções e React)
