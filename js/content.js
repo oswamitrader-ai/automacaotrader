@@ -2,7 +2,14 @@
 // CONTENT SCRIPT - Injected in Broker Sites
 // ============================================
 
-console.log("[BinaryOps Content Script] Iniciado na página:", window.location.hostname);
+(function() {
+  if (window.__binaryOpsContentLoaded) {
+    console.log("[BinaryOps Content Script] Já carregado nesta página. Ignorando nova injeção para evitar duplicidade de ordens.");
+    return;
+  }
+  window.__binaryOpsContentLoaded = true;
+
+  console.log("[BinaryOps Content Script] Iniciado na página:", window.location.hostname);
 
 // =========================================================================
 // O script de interceptação do WebSocket (MAIN World) é registrado no manifest.json
@@ -64,23 +71,42 @@ window.addEventListener('message', (event) => {
     const rawData = event.data.data;
     console.log(`[BinaryOps Content] Operação fechada recebida via WS!`, rawData);
     
-    // Mapear resultado
+    // Extrair valores (investimento e retorno)
+    const amountVal = rawData.amount || (rawData.msg && rawData.msg.amount) || rawData.invest || (rawData.msg && rawData.msg.invest) || rawData.enrolled_amount || (rawData.msg && rawData.msg.enrolled_amount) || 0;
+    const profitVal = rawData.profit || (rawData.msg && rawData.msg.profit) || rawData.win_amount || (rawData.msg && rawData.msg.win_amount) || rawData.profit_amount || (rawData.msg && rawData.msg.profit_amount) || 0;
+
+    // Mapear resultado (a API da corretora usa a chave "win" com os valores "win", "loose", "equal")
     let result = 'DRAW';
-    const profitState = rawData.result || (rawData.msg && rawData.msg.result) || '';
-    if (profitState === 'win' || profitState === 'win_by_payout') result = 'WIN';
-    else if (profitState === 'loose' || profitState === 'loss' || profitState === 'loose_by_payout') result = 'LOSS';
+    const winState = rawData.win || (rawData.msg && rawData.msg.win) || rawData.result || (rawData.msg && rawData.msg.result) || '';
+    
+    if (winState === 'win' || winState === 'win_by_payout') {
+      result = 'WIN';
+    } else if (winState === 'loose' || winState === 'loss' || winState === 'loose_by_payout') {
+      result = 'LOSS';
+    } else if (winState === 'equal' || winState === 'draw') {
+      result = 'DRAW';
+    } else {
+      // Fallback baseado nos valores financeiros se a corretora ocultar o winState
+      const amt = Number(amountVal);
+      const prof = Number(profitVal);
+      if (prof > amt) result = 'WIN';
+      else if (prof === 0 && amt > 0) result = 'LOSS';
+      else if (prof === amt && amt > 0) result = 'DRAW';
+      else result = 'LOSS'; // Em caso de dúvida, considerar Loss para não escalar soros indevidamente
+    }
     
     // Detectar direção
-    const direction = (rawData.dir || rawData.direction || 'CALL').toUpperCase();
-    
+    const dirRaw = rawData.dir || (rawData.msg && rawData.msg.dir) || rawData.direction || (rawData.msg && rawData.msg.direction) || rawData.type || (rawData.msg && rawData.msg.type) || 'CALL';
+    const direction = String(dirRaw).toUpperCase();
+
     // Envia para o background
     chrome.runtime.sendMessage({
       action: "option_closed_ws",
       data: {
         activeId: rawData.active_id || (rawData.msg && rawData.msg.active_id) || rawData.activeId,
         direction: direction,
-        amount: rawData.amount || (rawData.msg && rawData.msg.amount) || 0,
-        profit: rawData.profit || (rawData.msg && rawData.msg.profit) || rawData.win_amount || 0,
+        amount: Number(amountVal),
+        profit: Number(profitVal),
         result: result,
         optionId: rawData.option_id || (rawData.msg && rawData.msg.option_id) || rawData.id
       }
@@ -221,15 +247,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         sendResponse({ status: "success", msg: "Ordem executada via WebSocket API da corretora" });
       } else {
-        console.warn(`[BinaryOps Content Script] ⚠️ WebSocket rejeitou/falhou: ${event.data.error}. Tentando fallback DOM...`);
-        executeTradingOrder(message.direction, message.amount)
-          .then(() => {
-            monitorOperationResult(message.direction, message.amount, message.payout, message.pair, message.timeframe);
-            sendResponse({ status: "success", msg: `Fallback DOM (Aviso WS: ${event.data.error})` });
-          })
-          .catch(e => {
-            sendResponse({ status: "error", error: "WS falhou e DOM falhou: " + e.message });
-          });
+        console.warn(`[BinaryOps Content Script] ⚠️ Falha na execução via WS: ${event.data.error}`);
+        sendResponse({ status: "error", error: "Falha na execução WS: " + event.data.error });
       }
     };
 
@@ -246,23 +265,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       accountType: message.accountType
     }, '*');
 
-    // Timeout: se o MAIN world não responder em 4s, cair pro DOM
+    // Timeout de segurança: se o MAIN world não responder em 10s (ex: corretora indisponível)
     wsTimeout = setTimeout(() => {
       if (!wsResponded) {
         wsResponded = true;
         window.removeEventListener('message', wsResultHandler);
-        console.warn("[BinaryOps Content Script] Timeout WS. Tentando fallback via DOM...");
-
-        executeTradingOrder(message.direction, message.amount)
-          .then(() => {
-            monitorOperationResult(message.direction, message.amount, message.payout, message.pair, message.timeframe);
-            sendResponse({ status: "success", msg: "Fallback DOM (Timeout WS)" });
-          })
-          .catch(e => {
-            sendResponse({ status: "error", error: "Timeout WS e Falha no DOM: " + e.message });
-          });
+        console.warn("[BinaryOps Content Script] Timeout WS. A corretora demorou muito para responder o pedido da ordem.");
+        sendResponse({ status: "error", error: "Timeout WS: A corretora demorou muito para responder." });
       }
-    }, 4000);
+    }, 10000);
 
     return true;
   }
@@ -833,3 +844,5 @@ function reportResult(direction, result, amount, payout, targetPair, targetTimef
     data: data
   });
 }
+
+})(); // End of IIFE

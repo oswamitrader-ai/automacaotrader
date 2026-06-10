@@ -120,11 +120,18 @@
 
         // Interceptar conclusão de operação (Option/Position Closed) para feedback instantâneo
         if (name === "option-closed" || name === "position-closed" || (parsed.msg && (parsed.msg.name === "option-closed" || parsed.msg.name === "position-closed"))) {
-          console.log("[BinaryOps WS Received][OptionClosed]", parsed);
-          window.postMessage({
-            type: 'binaryops_option_closed',
-            data: parsed.msg || parsed
-          }, '*');
+          const optData = parsed.msg || parsed;
+          const closedId = String(optData.option_id || optData.id || optData.active_id);
+          
+          if (window.__binaryOps_openedOptionIds.has(closedId)) {
+            console.log("[BinaryOps WS Received][OptionClosed] Operação do robô finalizada:", parsed);
+            window.postMessage({
+              type: 'binaryops_option_closed',
+              data: optData
+            }, '*');
+          } else {
+            console.log("[BinaryOps WS Received][OptionClosed] Ignorando operação manual (ID não foi aberto pelo robô).", closedId);
+          }
         }
         // Tentar mapear dinamicamente os IDs que a corretora enviar
         const mapDynamicIds = (obj) => {
@@ -327,6 +334,8 @@
           expired: expTime,
           refund_value: 0,
           price: amount,
+          value: amount,       // Redundância para novas APIs
+          amount: amount,      // Redundância para novas APIs
           profit_percent: 0    // 0 = aceitar payout atual da corretora
         }
       }
@@ -386,18 +395,19 @@
           const optionId = (data.msg && data.msg.id) || data.id;
 
           if (msgName === 'error' || 
-             (data.msg && data.msg.message) || 
              (data.msg && data.msg.isSuccessful === false) ||
              (data.msg && data.msg.status === 'error') ||
-             !optionId) {
+             (data.msg && typeof data.msg.message === 'string' && data.msg.message.toLowerCase().includes('error'))) {
             
-            const errMsg = (data.msg && data.msg.message) || data.message || 'A corretora recusou a transação (Motivo genérico ou Par/Timeframe indisponível).';
-            console.warn(`[BinaryOps Interceptor] Falha ao enviar ordem: ${errMsg}`);
+            const errMsg = (data.msg && data.msg.message) ? data.msg.message : `Erro Genérico: ${JSON.stringify(data)}`;
+            console.warn(`[BinaryOps Interceptor] Falha ao enviar ordem:`, data);
             
             window.postMessage({ type: 'binaryops_order_result', requestId, status: 'error', error: errMsg }, '*');
           } else {
-            console.log(`[BinaryOps Interceptor] Ordem aceita pela corretora! ID: ${optionId}`, data);
-            window.__binaryOps_openedOptionIds.add(String(optionId));
+            console.log(`[BinaryOps Interceptor] Ordem aceita pela corretora! ID: ${optionId || 'Aguardando broadcast'}`, data);
+            if (optionId) {
+              window.__binaryOps_openedOptionIds.add(String(optionId));
+            }
             window.postMessage({ type: 'binaryops_order_result', requestId, status: 'success', data: data.msg || data }, '*');
           }
         }
@@ -421,7 +431,7 @@
         // Interceptar erros gerais enviados pela corretora MESMO SEM o nosso request_id
         if (msgName === 'error' || (data.msg && data.msg.message && data.msg.message.toLowerCase().includes("error"))) {
           if (!responded) {
-            const errMsg = (data.msg && data.msg.message) || data.message || 'A corretora recusou a transação (Motivo genérico ou Par/Timeframe indisponível)';
+            const errMsg = (data.msg && data.msg.message) ? data.msg.message : (data.message || `Erro Genérico Global: ${JSON.stringify(data)}`);
             console.error(`[BinaryOps Interceptor] ERRO GLOBAL DA CORRETORA:`, errMsg, data);
             
             // Só mandamos o erro pro fallback se tivermos a certeza que foi uma tentativa de operação recente.

@@ -55,7 +55,10 @@ const Bot = (() => {
     // Propriedades do SorosGale
     prejuizoAcumuladoSorosGale: 0,
     inSorosGaleRecovery: false,
-    sorosGaleStep: 0 // 0 = normal, 1 = recuperando Soros
+    sorosGaleStep: 0, // 0 = normal, 1 = recuperando Soros
+    
+    // Rastreamento para Sinais Consecutivos (Soros/Gale)
+    lastOrderTime: null
   };
 
   // Inicialização
@@ -717,6 +720,9 @@ const Bot = (() => {
     const dirText = direction === 'CALL' ? 'ACIMA' : 'ABAIXO';
     logToConsole(`Enviando ordem: ${pair} -> ${dirText} | Valor: ${cur} ${(amount || 0).toFixed(2)} | Expiração: ${timeframe}`, 'info');
 
+    // Registrar o timestamp para detectar sinais consecutivos no futuro
+    state.lastOrderTime = Date.now();
+
     const isExtensionAvailable = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage;
     
     // Identificar a aba correta para multi-pares
@@ -794,6 +800,17 @@ const Bot = (() => {
   // ---- Gerenciamento de Resultados (Martingale e Soros) ----
 
   function handleTradingResult(opData) {
+    // Evitar processamento duplicado do mesmo sinal
+    const optionIdMatch = opData.notes ? opData.notes.match(/Option ID:\s*([^)]+)/) : null;
+    const optionId = optionIdMatch ? optionIdMatch[1] : null;
+
+    if (optionId && state.lastProcessedOption === optionId) {
+      return; // Ignora duplicata silenciosamente
+    }
+    if (optionId) {
+      state.lastProcessedOption = optionId;
+    }
+
     const prefix = opData.isSimulation ? '[Resultado Simulação]' : '[Resultado]';
     logToConsole(`${prefix} Operação finalizada no par ${opData.pair}: ${opData.result}!`, opData.result === 'WIN' ? 'success' : opData.result === 'LOSS' ? 'error' : 'warning');
 

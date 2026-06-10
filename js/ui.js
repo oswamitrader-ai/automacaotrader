@@ -164,7 +164,8 @@ const UI = (() => {
     const direction = document.getElementById('opDirection').value;
     const amount = parseFloat(document.getElementById('opAmount').value);
     const payout = parseFloat(document.getElementById('opPayout').value);
-    const result = document.getElementById('opResult').value;
+    const resultElement = document.querySelector('input[name="opResult"]:checked');
+    const result = resultElement ? resultElement.value : null;
     const date = document.getElementById('opDate').value;
     const timeframe = document.getElementById('opTimeframe').value;
     const strategy = document.getElementById('opStrategy').value.trim();
@@ -198,7 +199,8 @@ const UI = (() => {
     document.getElementById('opDirection').value = op.direction;
     document.getElementById('opAmount').value = op.amount;
     document.getElementById('opPayout').value = op.payout;
-    document.getElementById('opResult').value = op.result;
+    const radio = document.querySelector(`input[name="opResult"][value="${op.result}"]`);
+    if (radio) radio.checked = true;
     document.getElementById('opDate').value = op.date;
     document.getElementById('opTimeframe').value = op.timeframe || '';
     document.getElementById('opStrategy').value = op.strategy || '';

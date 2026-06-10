@@ -33,8 +33,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Ping de status vindo do Dashboard
   if (message.action === "get_connected_brokers") {
+    // Restaurar a referência da aba do Dashboard em caso de restart do Service Worker
+    if (tabId) {
+      dashboardTabId = tabId;
+    }
+    
     // Para evitar perda de conexão em caso de restart do Service Worker (MV3), vamos consultar as abas ativas
-    chrome.tabs.query({ url: ["*://*.exnova.com/*", "*://*.iqoption.com/*", "*://*.bullex.com/*", "*://*.exnova.com", "*://*.iqoption.com", "*://*.bullex.com"] }, (tabs) => {
+    chrome.tabs.query({ url: ["*://*.exnova.com/*", "*://*.iqoption.com/*", "*://*.bullex.com/*"] }, (tabs) => {
+      if (chrome.runtime.lastError || !tabs) {
+        console.warn("[Background] Erro ao buscar abas:", chrome.runtime.lastError);
+        sendResponse({ brokers: [] });
+        return;
+      }
+
       const activeBrokers = [];
       tabs.forEach(t => {
         let brokerName = 'desconhecido';
