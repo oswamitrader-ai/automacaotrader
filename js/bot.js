@@ -712,6 +712,7 @@ const Bot = (() => {
         if (!isNaN(uiAmount) && uiAmount > 0) {
           amount = Number(uiAmount.toFixed(2));
           state.baseAmount = amount; // Atualiza a base para garantir
+          state.nextAmount = amount; // Atualiza o nextAmount também para o fallback do Gale
         }
       }
     }
@@ -800,16 +801,15 @@ const Bot = (() => {
   // ---- Gerenciamento de Resultados (Martingale e Soros) ----
 
   function handleTradingResult(opData) {
-    // Evitar processamento duplicado do mesmo sinal
-    const optionIdMatch = opData.notes ? opData.notes.match(/Option ID:\s*([^)]+)/) : null;
-    const optionId = optionIdMatch ? optionIdMatch[1] : null;
-
-    if (optionId && state.lastProcessedOption === optionId) {
-      return; // Ignora duplicata silenciosamente
+    // Filtro de Duplicatas Bulletproof (Tempo + Par)
+    // A corretora manda 2 mensagens de fechamento quase simultâneas.
+    // O Option ID às vezes vem vazio na segunda, burlando o filtro anterior.
+    const now = Date.now();
+    if (state.lastProcessedTime && (now - state.lastProcessedTime < 2000) && state.lastProcessedPair === opData.pair) {
+      return; // Ignora duplicata do mesmo par que chegou em menos de 2s
     }
-    if (optionId) {
-      state.lastProcessedOption = optionId;
-    }
+    state.lastProcessedTime = now;
+    state.lastProcessedPair = opData.pair;
 
     const prefix = opData.isSimulation ? '[Resultado Simulação]' : '[Resultado]';
     logToConsole(`${prefix} Operação finalizada no par ${opData.pair}: ${opData.result}!`, opData.result === 'WIN' ? 'success' : opData.result === 'LOSS' ? 'error' : 'warning');
@@ -875,8 +875,13 @@ const Bot = (() => {
       if (settings.useSoros) {
         if (settings.sorosLevel > 0 && state.currentSorosStage < settings.sorosLevel) {
           state.currentSorosStage++;
-          const profit = opData.amount * (opData.payout / 100);
-          state.nextAmount = Number((opData.amount + profit).toFixed(2));
+          
+          // Fallback robusto se a corretora omitir o valor investido
+          const prevAmount = opData.amount > 0 ? opData.amount : state.nextAmount;
+          const payoutRate = opData.payout > 0 ? (opData.payout / 100) : 0.85;
+          const profit = prevAmount * payoutRate;
+          
+          state.nextAmount = Number((prevAmount + profit).toFixed(2));
           logToConsole(`[Soros] WIN! Alavancando para nível ${state.currentSorosStage}. Próxima entrada: ${cur} ${state.nextAmount.toFixed(2)}`, 'success');
         } else {
           state.currentSorosStage = 0;
@@ -889,12 +894,22 @@ const Bot = (() => {
     } else if (opData.result === 'LOSS') {
       state.consecutiveLosses++;
       
-      if (settings.useMartingale && state.currentGale < settings.martingales) {
+      const maxGales = (settings.useMartingale && settings.martingales === 0) ? 1 : settings.martingales;
+      
+      if (settings.useMartingale && state.currentGale < maxGales) {
         state.currentGale++;
-        state.nextAmount = Number((opData.amount * settings.galeFactor).toFixed(2));
-        logToConsole(`[Martingale] LOSS! Aplicando Gale nível ${state.currentGale} imediatamente na próxima vela.`, 'warning');
-        // Disparar a operação do Gale IMEDIATAMENTE
-        executeTradingOrder(opData.pair, opData.direction, opData.timeframe);
+        
+        // Fallback robusto se a corretora omitir o valor investido
+        const prevAmount = opData.amount > 0 ? opData.amount : state.nextAmount;
+        
+        state.nextAmount = Number((prevAmount * settings.galeFactor).toFixed(2));
+        logToConsole(`[Martingale] LOSS! Aplicando Gale nível ${state.currentGale} na próxima vela (aguardando 4s para evitar bloqueio da corretora).`, 'warning');
+        
+        // Disparar a operação do Gale com um atraso cirúrgico de 4s
+        // Muitas contas na corretora possuem uma trava anti-latência (delay) de até 3.5s no início de uma nova vela.
+        setTimeout(() => {
+          executeTradingOrder(opData.pair, opData.direction, opData.timeframe);
+        }, 4000);
       } else {
         state.currentGale = 0;
         state.currentSorosStage = 0;

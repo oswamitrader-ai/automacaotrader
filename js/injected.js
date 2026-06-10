@@ -408,6 +408,9 @@
             if (optionId) {
               window.__binaryOps_openedOptionIds.add(String(optionId));
             }
+            if (activeId) {
+              window.__binaryOps_openedOptionIds.add(String(activeId));
+            }
             window.postMessage({ type: 'binaryops_order_result', requestId, status: 'success', data: data.msg || data }, '*');
           }
         }
@@ -416,6 +419,9 @@
           const optData = data.msg || data;
           if (optData.id) {
              window.__binaryOps_openedOptionIds.add(String(optData.id));
+          }
+          if (optData.active_id) {
+             window.__binaryOps_openedOptionIds.add(String(optData.active_id));
           }
           // Validar se o broadcast é da opção que acabamos de mandar (mesmo par e direção)
           if (String(optData.active_id) === String(activeId) && String(optData.direction) === String(dir)) {
