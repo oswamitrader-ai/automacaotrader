@@ -597,12 +597,22 @@
                 </select>
               </div>
             </div>
-
             <div class="form-row-3">
               <div class="form-group">
-                <label class="form-label">Valor da Entrada</label>
+                <label class="form-label">Valor da Entrada (Mão Base)</label>
                 <input type="number" class="form-input" id="botEntryAmount" min="2" step="0.5" value="10">
               </div>
+              <div class="form-group">
+                <label class="form-label">Valor do Martingale</label>
+                <input type="number" class="form-input" id="botGaleAmount" min="2" step="0.5" value="20">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Valor do Soros</label>
+                <input type="number" class="form-input" id="botSorosAmount" min="2" step="0.5" value="18">
+              </div>
+            </div>
+
+            <div class="form-row-3">
               <div class="form-group">
                 <label class="form-label">Stop Win (Lucro)</label>
                 <input type="number" class="form-input" id="botStopWin" min="0" step="1" value="50">
@@ -611,66 +621,23 @@
                 <label class="form-label">Stop Loss (Prejuízo)</label>
                 <input type="number" class="form-input" id="botStopLoss" min="0" step="1" value="50">
               </div>
-            </div>
-
-            <div class="form-row">
               <div class="form-group">
                 <label class="form-label">Payout Mín (%)</label>
                 <input type="number" class="form-input" id="botMinPayout" min="10" max="100" value="80">
               </div>
-              <div class="form-group">
-                <label class="form-label" style="display:block; margin-bottom:10px;">Sistemas de Gestão (Combináveis)</label>
-                <div style="display:flex; flex-direction:column; gap:8px;">
-                  <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--text-primary); font-size:0.85rem;">
-                    <input type="checkbox" id="botUseMartingale" checked style="accent-color:var(--neon-cyan); transform:scale(1.2);"> Ativar Martingale (Recuperação no Loss)
-                  </label>
-                  <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--text-primary); font-size:0.85rem;">
-                    <input type="checkbox" id="botUseSoros" style="accent-color:var(--neon-cyan); transform:scale(1.2);"> Ativar Soros (Alavancagem no Win)
-                  </label>
-                  <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--text-primary); font-size:0.85rem;">
-                    <input type="checkbox" id="botUseCycles" style="accent-color:var(--neon-cyan); transform:scale(1.2);"> Ativar Ciclos (Tabela de Mãos)
-                  </label>
-                </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 15px;">
+              <label class="form-label" style="display:block; margin-bottom:10px;">Sistemas de Gestão Ativos</label>
+              <div style="display:flex; gap:20px;">
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--text-primary); font-size:0.85rem;">
+                  <input type="checkbox" id="botUseMartingale" checked style="accent-color:var(--neon-cyan); transform:scale(1.2);"> Martingale (Recuperação no Loss)
+                </label>
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--text-primary); font-size:0.85rem;">
+                  <input type="checkbox" id="botUseSoros" style="accent-color:var(--neon-cyan); transform:scale(1.2);"> Soros (Alavancagem no Win)
+                </label>
               </div>
             </div>
-
-            <!-- Bloco de Configuração de Martingale -->
-            <div class="form-row" id="mgmtMartingaleSettings">
-              <div class="form-group">
-                <label class="form-label">Martingale (Nível)</label>
-                <select class="form-select" id="botMartingales">
-                  <option value="0">Sem Gale (Mão Leve)</option>
-                  <option value="1" selected>1 Martingale</option>
-                  <option value="2">2 Martingales</option>
-                  <option value="3">3 Martingales</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label class="form-label">Fator Gale</label>
-                <input type="number" class="form-input" id="botGaleFactor" step="0.1" min="1" value="2.0">
-              </div>
-            </div>
-
-            <!-- Bloco de Configuração de Soros (para Soros e SorosGale) -->
-            <div class="form-group" id="mgmtSorosSettings" style="display:none;">
-              <label class="form-label">Soros (Nível Máximo)</label>
-              <select class="form-select" id="botSorosLevel">
-                <option value="0">Desativado</option>
-                <option value="1" selected>Nível 1</option>
-                <option value="2">Nível 2</option>
-                <option value="3">Nível 3</option>
-              </select>
-            </div>
-
-            <!-- Bloco de Configuração de Ciclos -->
-            <div class="form-group" id="mgmtCyclesSettings" style="display:none; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; background: rgba(0,0,0,0.1); margin-bottom: 15px;">
-              <label class="form-label" style="color:var(--neon-green)">Tabela de Ciclos (Mãos)</label>
-              <p style="font-size: 0.7rem; color: var(--text-muted); margin-bottom: 5px;">Formato: C1: mão1, mão2 | C2: mão1, mão2... (cada ciclo na sua linha)</p>
-              <textarea class="form-textarea" id="botCyclesConfig" rows="3" placeholder="C1: 10, 20
-C2: 15, 30
-C3: 25, 55"></textarea>
-            </div>
-
 
             <div class="form-group">
               <label class="form-label">Estratégia Principal</label>

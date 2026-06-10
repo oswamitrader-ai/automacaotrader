@@ -18,6 +18,95 @@
   window.__binaryOps_lastMsgs = window.__binaryOps_lastMsgs || [];
   window.__binaryOps_openedOptionIds = window.__binaryOps_openedOptionIds || new Set();
   
+  function getPairNameByActiveId(activeId) {
+    if (!activeId) return null;
+    // 1. Procurar no mapeamento dinâmico primeiro
+    if (window.__binaryOps_dynamicIds) {
+      for (const [pair, id] of Object.entries(window.__binaryOps_dynamicIds)) {
+        if (String(id) === String(activeId)) {
+          return pair;
+        }
+      }
+    }
+    
+    // 2. Dicionário estático fallback
+    const staticIds = {
+      'EUR/USD': 1, 'GBP/USD': 2, 'USD/JPY': 3, 'EUR/JPY': 4, 'GBP/JPY': 5,
+      'USD/CHF': 6, 'EUR/GBP': 7, 'EUR/CHF': 8, 'AUD/USD': 9, 'USD/CAD': 10, 'NZD/USD': 11,
+      'AUD/CAD': 99, 'AUD/CHF': 100, 'AUD/JPY': 101, 'GBP/CAD': 102, 'GBP/CHF': 103,
+      'GBP/AUD': 104, 'NZD/JPY': 105, 'CAD/JPY': 106, 'EUR/CAD': 107, 'EUR/AUD': 108,
+      'CHF/JPY': 109, 'CAD/CHF': 110,
+      
+      'EUR/USD-OTC': 76, 'GBP/USD-OTC': 77, 'EUR/JPY-OTC': 78, 'EUR/GBP-OTC': 79,
+      'USD/JPY-OTC': 81, 'GBP/JPY-OTC': 82, 'NZD/USD-OTC': 83, 'USD/CAD-OTC': 84,
+      'AUD/USD-OTC': 85, 'AUD/CAD-OTC': 86,
+      'AUD/JPY-OTC': 168, 'EUR/AUD-OTC': 169, 'EUR/CAD-OTC': 170,
+      'GBP/AUD-OTC': 171, 'GBP/CAD-OTC': 172, 'GBP/CHF-OTC': 173,
+      'NZD/JPY-OTC': 174, 'CAD/JPY-OTC': 175, 'CHF/JPY-OTC': 176,
+      'EUR/CHF-OTC': 177, 'AUD/CHF-OTC': 178, 'CAD/CHF-OTC': 179
+    };
+    for (const [pair, id] of Object.entries(staticIds)) {
+      if (String(id) === String(activeId)) {
+        return pair;
+      }
+    }
+    return null;
+  }
+
+  function getActiveIdByPair(pair) {
+    if (!pair) return null;
+    if (window.__binaryOps_dynamicIds) {
+      const cleanPair = pair.replace(' ', '').toUpperCase();
+      if (window.__binaryOps_dynamicIds[cleanPair]) {
+        return window.__binaryOps_dynamicIds[cleanPair];
+      }
+    }
+    const staticIds = {
+      'EUR/USD': 1, 'GBP/USD': 2, 'USD/JPY': 3, 'EUR/JPY': 4, 'GBP/JPY': 5,
+      'USD/CHF': 6, 'EUR/GBP': 7, 'EUR/CHF': 8, 'AUD/USD': 9, 'USD/CAD': 10, 'NZD/USD': 11,
+      'AUD/CAD': 99, 'AUD/CHF': 100, 'AUD/JPY': 101, 'GBP/CAD': 102, 'GBP/CHF': 103,
+      'GBP/AUD': 104, 'NZD/JPY': 105, 'CAD/JPY': 106, 'EUR/CAD': 107, 'EUR/AUD': 108,
+      'CHF/JPY': 109, 'CAD/CHF': 110,
+      
+      'EUR/USD-OTC': 76, 'GBP/USD-OTC': 77, 'EUR/JPY-OTC': 78, 'EUR/GBP-OTC': 79,
+      'USD/JPY-OTC': 81, 'GBP/JPY-OTC': 82, 'NZD/USD-OTC': 83, 'USD/CAD-OTC': 84,
+      'AUD/USD-OTC': 85, 'AUD/CAD-OTC': 86,
+      'AUD/JPY-OTC': 168, 'EUR/AUD-OTC': 169, 'EUR/CAD-OTC': 170,
+      'GBP/AUD-OTC': 171, 'GBP/CAD-OTC': 172, 'GBP/CHF-OTC': 173,
+      'NZD/JPY-OTC': 174, 'CAD/JPY-OTC': 175, 'CHF/JPY-OTC': 176,
+      'EUR/CHF-OTC': 177, 'AUD/CHF-OTC': 178, 'CAD/CHF-OTC': 179
+    };
+    const cleanPair = pair.replace(' ', '').toUpperCase();
+    return staticIds[cleanPair] || null;
+  }
+
+  async function decompressMsg(rawData) {
+    if (typeof rawData === 'string') return rawData;
+    try {
+      const arrayBuffer = rawData instanceof Blob ? await rawData.arrayBuffer() : rawData;
+      const ds = new DecompressionStream('deflate');
+      const writer = ds.writable.getWriter();
+      writer.write(arrayBuffer);
+      writer.close();
+      const response = new Response(ds.readable);
+      const buffer = await response.arrayBuffer();
+      return new TextDecoder().decode(buffer);
+    } catch(e1) {
+      try {
+        const arrayBuffer = rawData instanceof Blob ? await rawData.arrayBuffer() : rawData;
+        const ds = new DecompressionStream('deflate-raw');
+        const writer = ds.writable.getWriter();
+        writer.write(arrayBuffer);
+        writer.close();
+        const response = new Response(ds.readable);
+        const buffer = await response.arrayBuffer();
+        return new TextDecoder().decode(buffer);
+      } catch(e2) {
+        return null;
+      }
+    }
+  }
+  
   const activeWebSockets = window.__binaryOps_ws;
   const OriginalWebSocket = window.WebSocket;
 
@@ -47,10 +136,30 @@
     };
 
     // Ouvir mensagens recebidas para fins de log
-    ws.addEventListener('message', (event) => {
+    ws.addEventListener('message', async (event) => {
       try {
-        const parsed = JSON.parse(event.data);
+        const decompressed = await decompressMsg(event.data);
+        if (!decompressed) return;
+        const parsed = JSON.parse(decompressed);
         const name = parsed.name || (parsed.msg && parsed.msg.name) || '';
+
+        // Captura agressiva global de IDs de saldo em QUALQUER pacote recebido
+        const findBalanceIdAggressive = (obj) => {
+          if (!obj) return;
+          if (Array.isArray(obj)) { obj.forEach(findBalanceIdAggressive); return; }
+          if (typeof obj === 'object') {
+            if (obj.user_balance_id) window.__binaryOps_lastSeenBalanceId = obj.user_balance_id;
+            if (obj.balance_id) window.__binaryOps_lastSeenBalanceId = obj.balance_id;
+            if (obj.id && obj.type !== undefined && obj.amount !== undefined && (obj.type === 1 || obj.type === 4)) {
+               window.__binaryOps_balances = window.__binaryOps_balances || {};
+               if (obj.type === 1) window.__binaryOps_balances.real = obj.id;
+               if (obj.type === 4) window.__binaryOps_balances.demo = obj.id;
+            }
+            Object.values(obj).forEach(findBalanceIdAggressive);
+          }
+        };
+        try { findBalanceIdAggressive(parsed); } catch(e){}
+
         
         // Sincronizar o horário do servidor da corretora
         if (name === "timeSync") {
@@ -118,16 +227,58 @@
           }
         }
 
-        // Interceptar conclusão de operação (Option/Position Closed) para feedback instantâneo
-        if (name === "option-closed" || name === "position-closed" || (parsed.msg && (parsed.msg.name === "option-closed" || parsed.msg.name === "position-closed"))) {
-          const optData = parsed.msg || parsed;
-          const closedId = String(optData.option_id || optData.id || optData.active_id);
+        // Interceptar abertura de operação (Option Opened) globalmente para associar IDs a ordens físicas (DOM) ou WS recentes
+        if (name === "option" || name === "option-opened" || name === "binary-options.option-opened" || (parsed.msg && (parsed.msg.name === "option-opened" || parsed.msg.name === "binary-options.option-opened"))) {
+          const optData = (parsed.msg && parsed.msg.body) || parsed.msg || parsed;
+          const optId = String(optData.id || optData.option_id || optData.optionId || '');
+          const activeId = optData.active_id || optData.activeId;
+          const dir = String(optData.direction || optData.dir || optData.type || '').toLowerCase();
           
-          if (window.__binaryOps_openedOptionIds.has(closedId)) {
+          if (optId && optId !== 'undefined' && window.__binaryOps_lastRobotOrder) {
+            const lastOrder = window.__binaryOps_lastRobotOrder;
+            const timeSinceOrder = Date.now() - lastOrder.timestamp;
+            const activeIdMatches = String(activeId) === String(lastOrder.activeId);
+            const directionMatches = dir === lastOrder.direction.toLowerCase();
+            
+            // Se foi enviada há menos de 20 segundos
+            if (activeIdMatches && directionMatches && timeSinceOrder < 20000) {
+              console.log(`[BinaryOps WS Received][OptionOpened] Associando ID ${optId} à ordem recente do robô!`);
+              window.__binaryOps_openedOptionIds.add(optId);
+            }
+          }
+        }
+
+        // Interceptar conclusão de operação (Option/Position Closed) para feedback instantâneo
+        if (name === "option-closed" || name === "position-closed" || name === "binary-options.option-closed" || (parsed.msg && (parsed.msg.name === "option-closed" || parsed.msg.name === "position-closed" || parsed.msg.name === "binary-options.option-closed"))) {
+          const optData = (parsed.msg && parsed.msg.body) || parsed.msg || parsed;
+          const closedId = String(optData.option_id || optData.id || optData.optionId || '');
+          if (closedId === '' || closedId === 'undefined') return;
+          
+          let isRobotOrder = window.__binaryOps_openedOptionIds.has(closedId);
+          
+          // Fallback se o ID não estiver no Set (ex: falha na captura de abertura), mas as características batem
+          if (!isRobotOrder && window.__binaryOps_lastRobotOrder) {
+            const lastOrder = window.__binaryOps_lastRobotOrder;
+            const timeSinceOrder = Date.now() - lastOrder.timestamp;
+            const activeIdMatches = String(optData.active_id || optData.activeId) === String(lastOrder.activeId);
+            const directionMatches = String(optData.dir || optData.direction || optData.type || '').toLowerCase() === lastOrder.direction.toLowerCase();
+            
+            // Se foi enviada há menos de 10 minutos (600000ms)
+            if (activeIdMatches && directionMatches && timeSinceOrder < 600000) {
+              console.log("[BinaryOps WS Received][OptionClosed] Fallback de segurança ativado: Correspondência encontrada por par e direção!", optData);
+              isRobotOrder = true;
+              window.__binaryOps_openedOptionIds.add(closedId); // Adiciona para evitar duplicidade
+            }
+          }
+          
+          if (isRobotOrder) {
             console.log("[BinaryOps WS Received][OptionClosed] Operação do robô finalizada:", parsed);
+            const activeId = optData.active_id || optData.activeId;
+            const resolvedPair = getPairNameByActiveId(activeId);
             window.postMessage({
               type: 'binaryops_option_closed',
-              data: optData
+              data: optData,
+              pairName: resolvedPair
             }, '*');
           } else {
             console.log("[BinaryOps WS Received][OptionClosed] Ignorando operação manual (ID não foi aberto pelo robô).", closedId);
@@ -200,7 +351,24 @@
   }
 
   window.addEventListener('message', (event) => {
-    if (!event.data || event.data.type !== 'binaryops_place_order_ws') return;
+    if (!event.data || !event.data.type) return;
+
+    if (event.data.type === 'binaryops_physical_order_placed') {
+      const { direction, amount, pair } = event.data;
+      const activeId = getActiveIdByPair(pair);
+      const dir = direction.toUpperCase() === 'CALL' ? 'call' : 'put';
+      console.log(`[BinaryOps Interceptor] Recebida notificação de ordem física (DOM): ${pair} -> ${dir} $${amount}`);
+      
+      window.__binaryOps_lastRobotOrder = {
+        activeId: activeId,
+        direction: dir,
+        amount: amount,
+        timestamp: Date.now()
+      };
+      return;
+    }
+
+    if (event.data.type !== 'binaryops_place_order_ws') return;
 
     const { direction, amount, pair, timeframe, requestId, accountType } = event.data;
     console.log(`[BinaryOps Interceptor] Ordem via WS recebida: ${pair} ${direction} $${amount} (Conta: ${accountType || 'Desconhecida'})`);
@@ -319,6 +487,15 @@
     const dir = direction.toUpperCase() === 'CALL' ? 'call' : 'put';
     const wsRequestId = 'bo_order_' + Math.floor(Math.random() * 1000000);
 
+    // Registrar a última ordem do robô como fallback de captura no option-closed
+    window.__binaryOps_lastRobotOrder = {
+      activeId: activeId,
+      direction: dir,
+      amount: amount,
+      expired: expTime,
+      timestamp: Date.now()
+    };
+
     // Formato da API IQ Option / Exnova para abrir opção binária
     const orderMsg = {
       name: "sendMessage",
@@ -357,32 +534,9 @@
     const responseHandler = async (event) => {
       if (responded) return;
       try {
-        let rawData = event.data;
-        if (typeof rawData !== 'string') {
-          try {
-            const arrayBuffer = rawData instanceof Blob ? await rawData.arrayBuffer() : rawData;
-            const ds = new DecompressionStream('deflate');
-            const writer = ds.writable.getWriter();
-            writer.write(arrayBuffer);
-            writer.close();
-            const response = new Response(ds.readable);
-            const buffer = await response.arrayBuffer();
-            rawData = new TextDecoder().decode(buffer);
-          } catch(e1) {
-            try {
-              const arrayBuffer = rawData instanceof Blob ? await rawData.arrayBuffer() : rawData;
-              const ds = new DecompressionStream('deflate-raw');
-              const writer = ds.writable.getWriter();
-              writer.write(arrayBuffer);
-              writer.close();
-              const response = new Response(ds.readable);
-              const buffer = await response.arrayBuffer();
-              rawData = new TextDecoder().decode(buffer);
-            } catch(e2) { return; }
-          }
-        }
-
-        const data = JSON.parse(rawData);
+        const decompressed = await decompressMsg(event.data);
+        if (!decompressed) return;
+        const data = JSON.parse(decompressed);
         const msgName = data.name || '';
         const respReqId = data.request_id || '';
 
@@ -392,7 +546,8 @@
           clearTimeout(responseTimeout);
           openWs.removeEventListener('message', responseHandler);
 
-          const optionId = (data.msg && data.msg.id) || data.id;
+          const optDataRes = (data.msg && data.msg.body) || data.msg || data;
+          const optionId = optDataRes.id || optDataRes.option_id || optDataRes.optionId;
 
           if (msgName === 'error' || 
              (data.msg && data.msg.isSuccessful === false) ||
@@ -408,23 +563,18 @@
             if (optionId) {
               window.__binaryOps_openedOptionIds.add(String(optionId));
             }
-            if (activeId) {
-              window.__binaryOps_openedOptionIds.add(String(activeId));
-            }
-            window.postMessage({ type: 'binaryops_order_result', requestId, status: 'success', data: data.msg || data }, '*');
+            window.postMessage({ type: 'binaryops_order_result', requestId, status: 'success', data: optDataRes }, '*');
           }
         }
         // Resposta via broadcast de abertura de opção da corretora
-        if (msgName === 'option' || msgName === 'option-opened' || msgName === 'binary-options.option-opened' || (data.msg && data.msg.name === 'option-opened')) {
-          const optData = data.msg || data;
-          if (optData.id) {
-             window.__binaryOps_openedOptionIds.add(String(optData.id));
-          }
-          if (optData.active_id) {
-             window.__binaryOps_openedOptionIds.add(String(optData.active_id));
+        if (msgName === 'option' || msgName === 'option-opened' || msgName === 'binary-options.option-opened' || (data.msg && (data.msg.name === 'option-opened' || data.msg.name === 'binary-options.option-opened'))) {
+          const optData = (data.msg && data.msg.body) || data.msg || data;
+          const optId = optData.id || optData.option_id || optData.optionId;
+          if (optId) {
+             window.__binaryOps_openedOptionIds.add(String(optId));
           }
           // Validar se o broadcast é da opção que acabamos de mandar (mesmo par e direção)
-          if (String(optData.active_id) === String(activeId) && String(optData.direction) === String(dir)) {
+          if (String(optData.active_id) === String(activeId) && String(optData.direction || optData.dir) === String(dir)) {
             if (!responded) {
               responded = true;
               clearTimeout(responseTimeout);

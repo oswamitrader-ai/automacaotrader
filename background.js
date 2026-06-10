@@ -4,6 +4,7 @@
 
 let dashboardTabId = null;
 let brokerTabs = new Map(); // tabId -> brokerInfo (e.g., 'exnova', 'iqoption', 'bullex')
+let latestRobotData = null; // Estado mais recente do robô para o overlay na corretora
 
 // 1. Abrir o Dashboard em uma aba inteira ao clicar no ícone da extensão
 chrome.action.onClicked.addListener((tab) => {
@@ -14,9 +15,23 @@ chrome.action.onClicked.addListener((tab) => {
   });
 });
 
+// Função auxiliar para salvar operação pendente no storage
+function savePendingOp(opData) {
+  chrome.storage.local.get({ pendingOps: [] }, (result) => {
+    const pending = result.pendingOps || [];
+    pending.push(opData);
+    chrome.storage.local.set({ pendingOps: pending });
+  });
+}
+
 // 2. Ouvir mensagens de abas de corretoras (Content Scripts) e do Dashboard
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const tabId = sender.tab ? sender.tab.id : null;
+  const isDashboardSender = sender.tab && (sender.tab.url.includes("index.html") || (sender.tab.url.includes("chrome-extension://") && sender.tab.url.endsWith("index.html")));
+
+  if (isDashboardSender) {
+    dashboardTabId = sender.tab.id;
+  }
 
   // Registrar aba da corretora quando ela é iniciada
   if (message.action === "broker_initialized") {
@@ -33,36 +48,114 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Ping de status vindo do Dashboard
   if (message.action === "get_connected_brokers") {
-    // Restaurar a referência da aba do Dashboard em caso de restart do Service Worker
-    if (tabId) {
-      dashboardTabId = tabId;
+    if (sender.tab && sender.tab.id) {
+      dashboardTabId = sender.tab.id;
     }
     
-    // Para evitar perda de conexão em caso de restart do Service Worker (MV3), vamos consultar as abas ativas
-    chrome.tabs.query({ url: ["*://*.exnova.com/*", "*://*.iqoption.com/*", "*://*.bullex.com/*"] }, (tabs) => {
-      if (chrome.runtime.lastError || !tabs) {
-        console.warn("[Background] Erro ao buscar abas:", chrome.runtime.lastError);
-        sendResponse({ brokers: [] });
-        return;
-      }
-
-      const activeBrokers = [];
-      tabs.forEach(t => {
-        let brokerName = 'desconhecido';
-        if (t.url.includes('exnova')) brokerName = 'exnova';
-        else if (t.url.includes('iqoption')) brokerName = 'iqoption';
-        else if (t.url.includes('bullex')) brokerName = 'bullex';
-        
-        activeBrokers.push({ tabId: t.id, broker: brokerName, title: t.title });
-        
-        // Restaurar o mapa na memória caso o Service Worker tenha reiniciado
-        if (!brokerTabs.has(t.id)) {
-          brokerTabs.set(t.id, { broker: brokerName, url: t.url, title: t.title });
+    // Despachar operações que ficaram na fila enquanto o Service Worker estava suspenso/reiniciado
+    if (dashboardTabId) {
+      chrome.storage.local.get({ pendingOps: [] }, (result) => {
+        const pending = result.pendingOps || [];
+        if (pending.length > 0) {
+          console.log(`[Background Service Worker] Despachando ${pending.length} operações pendentes acumuladas para a aba do Dashboard: ${dashboardTabId}`);
+          pending.forEach(op => {
+            chrome.tabs.sendMessage(dashboardTabId, {
+              action: "save_bot_operation",
+              data: op
+            }).catch(() => {});
+          });
+          // Limpar a fila após despachar com sucesso
+          chrome.storage.local.set({ pendingOps: [] });
         }
       });
-      sendResponse({ brokers: activeBrokers });
+    }
+    
+    // Retornar operações na resposta direta do ping para garantir compatibilidade com file:///
+    chrome.storage.local.get({ pendingOps: [] }, (storageResult) => {
+      const pendingForResponse = storageResult.pendingOps || [];
+      
+      chrome.tabs.query({ url: ["*://*.exnova.com/*", "*://*.iqoption.com/*", "*://*.bullex.com/*"] }, (tabs) => {
+        if (chrome.runtime.lastError || !tabs) {
+          console.warn("[Background] Erro ao buscar abas:", chrome.runtime.lastError);
+          sendResponse({ brokers: [], pendingOps: pendingForResponse });
+          if (pendingForResponse.length > 0) {
+            chrome.storage.local.set({ pendingOps: [] });
+          }
+          return;
+        }
+
+        const activeBrokers = [];
+        tabs.forEach(t => {
+          let brokerName = 'desconhecido';
+          if (t.url.includes('exnova')) brokerName = 'exnova';
+          else if (t.url.includes('iqoption')) brokerName = 'iqoption';
+          else if (t.url.includes('bullex')) brokerName = 'bullex';
+          
+          activeBrokers.push({ tabId: t.id, broker: brokerName, title: t.title });
+          
+          // Restaurar o mapa na memória caso o Service Worker tenha reiniciado
+          if (!brokerTabs.has(t.id)) {
+            brokerTabs.set(t.id, { broker: brokerName, url: t.url, title: t.title });
+          }
+        });
+        
+        sendResponse({ brokers: activeBrokers, pendingOps: pendingForResponse });
+        if (pendingForResponse.length > 0) {
+          chrome.storage.local.set({ pendingOps: [] });
+        }
+      });
     });
     return true; // Mantém o canal aberto para a resposta assíncrona
+  }
+
+  // Sincronizar dados do robô (vindos do Dashboard) e encaminhar para as abas da corretora
+  if (message.action === "sync_bot_data") {
+    latestRobotData = message.data;
+    if (sender.tab && sender.tab.id) {
+      dashboardTabId = sender.tab.id;
+    }
+
+    // Consultar abas ativas das corretoras para restaurar brokerTabs caso o Service Worker tenha reiniciado
+    chrome.tabs.query({ url: ["*://*.exnova.com/*", "*://*.iqoption.com/*", "*://*.bullex.com/*"] }, (tabs) => {
+      if (tabs) {
+        tabs.forEach(t => {
+          let brokerName = 'desconhecido';
+          if (t.url.includes('exnova')) brokerName = 'exnova';
+          else if (t.url.includes('iqoption')) brokerName = 'iqoption';
+          else if (t.url.includes('bullex')) brokerName = 'bullex';
+          
+          if (!brokerTabs.has(t.id)) {
+            brokerTabs.set(t.id, { broker: brokerName, url: t.url, title: t.title });
+          }
+        });
+      }
+      
+      // Encaminhar para todas as abas de corretoras abertas
+      brokerTabs.forEach((info, bTabId) => {
+        chrome.tabs.sendMessage(bTabId, {
+          action: "update_broker_overlay",
+          data: latestRobotData
+        }).catch(() => {
+          brokerTabs.delete(bTabId); // Limpar referências de abas fechadas
+        });
+      });
+    });
+
+    // Retornar operações na resposta direta do ping para garantir compatibilidade com file:///
+    chrome.storage.local.get({ pendingOps: [] }, (storageResult) => {
+      const pendingForResponse = storageResult.pendingOps || [];
+      sendResponse({ status: "synced", pendingOps: pendingForResponse });
+      if (pendingForResponse.length > 0) {
+        chrome.storage.local.set({ pendingOps: [] });
+      }
+    });
+    return true; // Mantém o canal aberto para a resposta assíncrona
+  }
+
+  // Responder com os dados mais recentes do robô (para abas recém-abertas)
+  if (message.action === "get_latest_bot_data") {
+    sendResponse({ data: latestRobotData });
+    return;
   }
 
   // Encaminhar sinal/ordem do Dashboard para a corretora
@@ -109,14 +202,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       chrome.tabs.sendMessage(dashboardTabId, {
         action: "save_bot_operation",
         data: message.data
+      }).catch((err) => {
+        console.warn("[Background] Falha ao enviar para dashboardTabId. Salvando no storage local.", err);
+        savePendingOp(message.data);
       });
     } else {
-      // Se o dashboard estiver fechado, salvar provisoriamente no storage local
-      chrome.storage.local.get({ pendingOps: [] }, (result) => {
-        const pending = result.pendingOps;
-        pending.push(message.data);
-        chrome.storage.local.set({ pendingOps: pending });
-      });
+      savePendingOp(message.data);
     }
     sendResponse({ status: "delivered" });
     return true;
@@ -125,7 +216,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Receber resultado instantâneo da corretora capturado via WebSocket
   if (message.action === "option_closed_ws") {
     const raw = message.data;
-    const pair = getPairForActiveId(raw.activeId);
+    const pair = raw.pair || getPairForActiveId(raw.activeId);
     
     // Mapear Payout
     let payout = 85; 
@@ -152,14 +243,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       chrome.tabs.sendMessage(dashboardTabId, {
         action: "save_bot_operation",
         data: opData
+      }).catch((err) => {
+        console.warn("[Background] Falha ao enviar opData para dashboardTabId. Salvando no storage local.", err);
+        savePendingOp(opData);
       });
     } else {
-      // Salvar provisoriamente no storage local
-      chrome.storage.local.get({ pendingOps: [] }, (result) => {
-        const pending = result.pendingOps;
-        pending.push(opData);
-        chrome.storage.local.set({ pendingOps: pending });
-      });
+      savePendingOp(opData);
     }
     sendResponse({ status: "success" });
     return true;

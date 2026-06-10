@@ -10,14 +10,13 @@ const Bot = (() => {
     broker: 'exnova',
     accountType: 'demo',
     entryAmount: 10,
+    galeAmount: 20,
+    sorosAmount: 18,
     minPayout: 80,
     stopWin: 50,
     stopLoss: 50,
-    martingales: 1,
-    galeFactor: 2.0,
-    sorosLevel: 0,
-    mgmtType: 'martingale', // 'martingale', 'soros', 'sorosgale', 'cycles'
-    cyclesConfig: 'C1: 10, 20\nC2: 15, 30\nC3: 25, 55',
+    useMartingale: true,
+    useSoros: false,
     newsFilter3: true,
     newsFilter2: false,
     newsMinBefore: 15,
@@ -36,28 +35,14 @@ const Bot = (() => {
   // Estado operacional do Robô
   let state = {
     currentGale: 0,
+    currentGaleByPair: {}, // par -> nível do Gale do par
     currentSorosStage: 0,
     baseAmount: 10,
     nextAmount: 10,
     lastOperation: null,
     consecutiveLosses: 0,
     lastTickTime: null,
-    // Histórico de velas simuladas para as estratégias MHI e Médias Móveis
     simulatedCandles: [],
-    
-    // Propriedades do gerenciamento de Ciclos
-    cycles: [], // Array de arrays, ex: [[10, 20], [15, 30], [25, 55]]
-    currentCycleIndex: 0, // Ciclo ativo
-    currentStepIndex: 0,  // Passo ativo no ciclo
-    inCyclesRecovery: false,
-    patternCooldownPairs: {},
-    
-    // Propriedades do SorosGale
-    prejuizoAcumuladoSorosGale: 0,
-    inSorosGaleRecovery: false,
-    sorosGaleStep: 0, // 0 = normal, 1 = recuperando Soros
-    
-    // Rastreamento para Sinais Consecutivos (Soros/Gale)
     lastOrderTime: null
   };
 
@@ -71,8 +56,6 @@ const Bot = (() => {
     
     // Iniciar ticker de ping a cada 5 segundos para manter status da corretora atualizado
     setInterval(checkConnectedBrokers, 5000);
-
-    // Inicialização da parte do calendário foi removida.
   }
 
   // Carregar configurações do LocalStorage
@@ -91,16 +74,13 @@ const Bot = (() => {
     if (el('botBroker')) el('botBroker').value = settings.broker;
     if (el('botAccountType')) el('botAccountType').value = settings.accountType;
     if (el('botEntryAmount')) el('botEntryAmount').value = settings.entryAmount;
+    if (el('botGaleAmount')) el('botGaleAmount').value = settings.galeAmount || (settings.entryAmount * 2.0);
+    if (el('botSorosAmount')) el('botSorosAmount').value = settings.sorosAmount || (settings.entryAmount * 1.8);
     if (el('botMinPayout')) el('botMinPayout').value = settings.minPayout;
     if (el('botStopWin')) el('botStopWin').value = settings.stopWin;
     if (el('botStopLoss')) el('botStopLoss').value = settings.stopLoss;
-    if (el('botMartingales')) el('botMartingales').value = settings.martingales;
-    if (el('botGaleFactor')) el('botGaleFactor').value = settings.galeFactor;
-    if (el('botSorosLevel')) el('botSorosLevel').value = settings.sorosLevel;
     if (el('botUseMartingale')) el('botUseMartingale').checked = settings.useMartingale !== false;
     if (el('botUseSoros')) el('botUseSoros').checked = settings.useSoros === true;
-    if (el('botUseCycles')) el('botUseCycles').checked = settings.useCycles === true;
-    if (el('botCyclesConfig')) el('botCyclesConfig').value = settings.cyclesConfig;
     if (el('botNewsFilter3')) el('botNewsFilter3').checked = settings.newsFilter3;
     if (el('botNewsFilter2')) el('botNewsFilter2').checked = settings.newsFilter2;
     if (el('botNewsMinBefore')) el('botNewsMinBefore').value = settings.newsMinBefore;
@@ -111,14 +91,11 @@ const Bot = (() => {
     if (el('botToggle')) el('botToggle').checked = settings.active;
 
     state.baseAmount = settings.entryAmount;
-    if (settings.mgmtType === 'cycles') {
-      loadCyclesTable();
-    } else {
+    if (state.currentGale === 0 && state.currentSorosStage === 0) {
       state.nextAmount = settings.entryAmount;
     }
 
     updateStrategyFields();
-    updateMgmtFields();
     updateBotStatusUI();
     renderNewsTable();
     
@@ -127,6 +104,7 @@ const Bot = (() => {
       logToConsole("🤖 ROBÔ ATIVADO automaticamente (estado salvo).", "success");
       startBotEngine();
     }
+    syncRobotDataWithExtension();
   }
 
   // Salvar configurações
@@ -135,16 +113,13 @@ const Bot = (() => {
     settings.broker = el('botBroker')?.value || 'exnova';
     settings.accountType = el('botAccountType')?.value || 'demo';
     settings.entryAmount = parseFloat(el('botEntryAmount')?.value) || 10;
+    settings.galeAmount = parseFloat(el('botGaleAmount')?.value) || (settings.entryAmount * 2.0);
+    settings.sorosAmount = parseFloat(el('botSorosAmount')?.value) || (settings.entryAmount * 1.8);
     settings.minPayout = parseInt(el('botMinPayout')?.value) || 80;
     settings.stopWin = parseFloat(el('botStopWin')?.value) || 50;
     settings.stopLoss = parseFloat(el('botStopLoss')?.value) || 50;
-    settings.martingales = parseInt(el('botMartingales')?.value) || 0;
-    settings.galeFactor = parseFloat(el('botGaleFactor')?.value) || 2.0;
-    settings.sorosLevel = parseInt(el('botSorosLevel')?.value) || 0;
     settings.useMartingale = el('botUseMartingale')?.checked ?? true;
     settings.useSoros = el('botUseSoros')?.checked ?? false;
-    settings.useCycles = el('botUseCycles')?.checked ?? false;
-    settings.cyclesConfig = el('botCyclesConfig')?.value || '';
     settings.newsFilter3 = el('botNewsFilter3')?.checked ?? true;
     settings.newsFilter2 = el('botNewsFilter2')?.checked ?? false;
     settings.newsMinBefore = parseInt(el('botNewsMinBefore')?.value) || 15;
@@ -157,15 +132,13 @@ const Bot = (() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
     
     state.baseAmount = settings.entryAmount;
-    if (settings.useCycles) {
-      loadCyclesTable();
-    }
     
-    if (state.currentGale === 0 && state.currentSorosStage === 0 && !state.inCyclesRecovery && !state.inSorosGaleRecovery) {
+    if (state.currentGale === 0 && state.currentSorosStage === 0) {
       state.nextAmount = settings.entryAmount;
     }
 
     logToConsole(`Configurações de Gestão salvas.`, 'info');
+    syncRobotDataWithExtension();
   }
 
   // UI Event Handlers
@@ -195,9 +168,8 @@ const Bot = (() => {
       saveSettings();
     });
 
-    ['botUseMartingale', 'botUseSoros', 'botUseCycles'].forEach(id => {
+    ['botUseMartingale', 'botUseSoros'].forEach(id => {
       document.getElementById(id)?.addEventListener('change', () => {
-        updateMgmtFields();
         saveSettings();
       });
     });
@@ -224,6 +196,16 @@ const Bot = (() => {
     document.getElementById('btnCalibrateCall')?.addEventListener('click', () => triggerCalibration('CALL'));
     document.getElementById('btnCalibratePut')?.addEventListener('click', () => triggerCalibration('PUT'));
     document.getElementById('btnCalibrateAmount')?.addEventListener('click', () => triggerCalibration('AMOUNT'));
+
+    // Eventos de digitação para sincronizar com a corretora
+    document.getElementById('botSignalsList')?.addEventListener('input', () => {
+      saveSettings();
+      syncRobotDataWithExtension();
+    });
+    document.getElementById('botPatternsList')?.addEventListener('input', () => {
+      saveSettings();
+      syncRobotDataWithExtension();
+    });
   }
 
   function updateStrategyFields() {
@@ -310,6 +292,75 @@ const Bot = (() => {
 
   // ---- Comunicação da Extensão ----
 
+  function syncRobotDataWithExtension() {
+    if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) return;
+
+    // Obter sinais
+    const textareaSignals = document.getElementById('botSignalsList');
+    const signalsText = textareaSignals ? textareaSignals.value : settings.signalsList;
+    const signalsLines = signalsText.split('\n');
+    const signals = [];
+    signalsLines.forEach(line => {
+      if (!line.trim()) return;
+      const parts = line.replace(/,/g, ';').split(';');
+      if (parts.length >= 3) {
+        signals.push({
+          time: parts[0].trim(),
+          pair: parts[1].trim(),
+          direction: parts[2].trim().toUpperCase(),
+          timeframe: parts[3] ? parts[3].trim().toUpperCase() : 'M1'
+        });
+      }
+    });
+
+    // Obter padrões
+    const textareaPatterns = document.getElementById('botPatternsList');
+    const patternsText = textareaPatterns ? textareaPatterns.value : '';
+    const patternsLines = patternsText.split('\n');
+    const patterns = [];
+    patternsLines.forEach(line => {
+      if (!line.trim()) return;
+      const parts = line.split(';');
+      if (parts.length >= 4) {
+        patterns.push({
+          pattern: parts[0].trim(),
+          pair: parts[1].trim(),
+          direction: parts[2].trim().toUpperCase(),
+          timeframe: parts[3].trim().toUpperCase()
+        });
+      }
+    });
+
+    const operations = (typeof Storage !== 'undefined' && Storage.getOperations) ? Storage.getOperations() : [];
+
+    const data = {
+      active: settings.active,
+      strategy: settings.strategy,
+      nextAmount: state.nextAmount,
+      baseAmount: state.baseAmount,
+      galeAmount: settings.galeAmount,
+      sorosAmount: settings.sorosAmount,
+      useMartingale: settings.useMartingale,
+      useSoros: settings.useSoros,
+      currentGale: state.currentGale,
+      currentSorosStage: state.currentSorosStage,
+      signals: signals,
+      patterns: patterns,
+      operations: operations
+    };
+
+    chrome.runtime.sendMessage({
+      action: "sync_bot_data",
+      data: data
+    }, (response) => {
+      if (response && Array.isArray(response.pendingOps) && response.pendingOps.length > 0) {
+        response.pendingOps.forEach(op => {
+          handleTradingResult(op);
+        });
+      }
+    });
+  }
+
   function setupExtensionListeners() {
     if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.onMessage) return;
 
@@ -336,6 +387,11 @@ const Bot = (() => {
         activeConnections = response.brokers;
         updateActiveConnectionsCount();
         updateBotStatusUI();
+      }
+      if (response && Array.isArray(response.pendingOps) && response.pendingOps.length > 0) {
+        response.pendingOps.forEach(op => {
+          handleTradingResult(op);
+        });
       }
     });
   }
@@ -384,10 +440,12 @@ const Bot = (() => {
     };
     
     timerWorker.postMessage('start');
+    syncRobotDataWithExtension();
   }
 
   function runBotTick() {
     if (!settings.active) return;
+    syncRobotDataWithExtension();
     
     const now = new Date();
     
@@ -408,6 +466,7 @@ const Bot = (() => {
       timerWorker.terminate();
       timerWorker = null;
     }
+    syncRobotDataWithExtension();
   }
 
   let lastExecutedSignalTime = null;
@@ -663,7 +722,7 @@ const Bot = (() => {
   }
 
   // Executar Ordem real ou simulada
-  function executeTradingOrder(pair, direction, timeframe) {
+  function executeTradingOrder(pair, direction, timeframe, forcedAmount = null) {
     // A checagem de notícias (Anti-loss) foi removida a pedido do usuário.
 
     // === VERIFICAÇÃO DE METAS E LIMITES (GLOBAIS E LOCAIS) ===
@@ -702,10 +761,11 @@ const Bot = (() => {
       }
     }
 
-    let amount = Number(Number(state.nextAmount).toFixed(2));
+    let amount = forcedAmount !== null ? forcedAmount : Number(Number(state.nextAmount).toFixed(2));
     
     // FORÇAR A LEITURA DO PAINEL SE FOR A PRIMEIRA ENTRADA (Evita dessincronização)
-    if (state.currentGale === 0 && state.currentSorosStage === 0 && !state.inCyclesRecovery) {
+    const currentGaleForPair = state.currentGaleByPair[pair] || 0;
+    if (currentGaleForPair === 0 && state.currentSorosStage === 0 && !state.inCyclesRecovery && forcedAmount === null) {
       const uiAmountEl = document.getElementById('botEntryAmount');
       if (uiAmountEl) {
         const uiAmount = parseFloat(uiAmountEl.value);
@@ -793,17 +853,10 @@ const Bot = (() => {
     }
   }
 
-  // Simulador de trading local (Removido)
-  function simulateLocalTradingResult(pair, direction, amount, timeframe) {
-    // Função obsoleta. Removida para evitar simulações indesejadas.
-  }
-
   // ---- Gerenciamento de Resultados (Martingale e Soros) ----
 
   function handleTradingResult(opData) {
     // Filtro de Duplicatas Bulletproof (Tempo + Par)
-    // A corretora manda 2 mensagens de fechamento quase simultâneas.
-    // O Option ID às vezes vem vazio na segunda, burlando o filtro anterior.
     const now = Date.now();
     if (state.lastProcessedTime && (now - state.lastProcessedTime < 2000) && state.lastProcessedPair === opData.pair) {
       return; // Ignora duplicata do mesmo par que chegou em menos de 2s
@@ -820,111 +873,70 @@ const Bot = (() => {
       App.refresh();
     }
 
-    // 2. Aplicar gerenciamento flexível (Soros, Martingale, Ciclos)
+    // 2. Aplicar nova gestão baseada em valores fixos
     const cur = Storage.getSettings ? (Storage.getSettings().currency === 'USD' ? '$' : 'R$') : '$';
+    const entryVal = settings.entryAmount;
+    const galeVal = settings.galeAmount || (entryVal * 2.0);
+    const sorosVal = settings.sorosAmount || (entryVal * 1.8);
+    const prevAmount = opData.amount > 0 ? opData.amount : state.nextAmount;
 
-    if (settings.useCycles) {
-      // CICLOS TÊM PRIORIDADE ABSOLUTA SE ATIVADOS
-      if (opData.result === 'WIN') {
-        state.consecutiveLosses = 0;
-        state.currentCycleIndex = 0;
-        state.currentStepIndex = 0;
-        state.inCyclesRecovery = false;
-        
-        if (state.cycles.length > 0) {
-          state.nextAmount = state.cycles[0][0];
-        } else {
-          state.nextAmount = state.baseAmount;
-        }
-        logToConsole(`[Ciclos] WIN detectado! Ciclo resetado para o início. Próxima entrada: ${cur} ${state.nextAmount.toFixed(2)}`, 'success');
-      } else if (opData.result === 'LOSS') {
-        state.consecutiveLosses++;
-        
-        // Avançar passo no ciclo atual
-        if (state.cycles.length > 0 && state.currentCycleIndex < state.cycles.length) {
-          state.currentStepIndex++;
-          const currentCycleArray = state.cycles[state.currentCycleIndex];
-          
-          if (state.currentStepIndex < currentCycleArray.length) {
-             state.nextAmount = currentCycleArray[state.currentStepIndex];
-             logToConsole(`[Ciclos] LOSS. Avançando mão no Ciclo ${state.currentCycleIndex + 1}. Próxima entrada: ${cur} ${state.nextAmount.toFixed(2)}`, 'warning');
-          } else {
-             state.currentCycleIndex++;
-             state.currentStepIndex = 0;
-             if (state.currentCycleIndex < state.cycles.length) {
-                state.nextAmount = state.cycles[state.currentCycleIndex][0];
-                logToConsole(`[Ciclos] LOSS. Ciclo falhou. Pulando para o Ciclo ${state.currentCycleIndex + 1}. Próxima entrada: ${cur} ${state.nextAmount.toFixed(2)}`, 'warning');
-             } else {
-                state.currentCycleIndex = 0;
-                state.nextAmount = state.cycles[0][0];
-                logToConsole(`[Ciclos] LOSS. Todos os Ciclos falharam (STOP). Resetando para o início. Próxima entrada: ${cur} ${state.nextAmount.toFixed(2)}`, 'error');
-             }
-          }
-        }
-      } else {
-        logToConsole(`[Ciclos] Empate. Repetindo a entrada: ${cur} ${state.nextAmount.toFixed(2)}`, 'info');
-      }
-      return; // Se estiver em Ciclos, ignora Soros/Gale
-    }
+    const pairKey = opData.pair;
+    state.currentGaleByPair[pairKey] = state.currentGaleByPair[pairKey] || 0;
 
-    // LÓGICA FLEXÍVEL (SOROS + MARTINGALE)
     if (opData.result === 'WIN') {
       state.consecutiveLosses = 0;
-      state.currentGale = 0; // Win reseta o Gale
+      state.currentGale = 0;
+      state.currentGaleByPair[pairKey] = 0;
       
       if (settings.useSoros) {
-        if (settings.sorosLevel > 0 && state.currentSorosStage < settings.sorosLevel) {
-          state.currentSorosStage++;
-          
-          // Fallback robusto se a corretora omitir o valor investido
-          const prevAmount = opData.amount > 0 ? opData.amount : state.nextAmount;
-          const payoutRate = opData.payout > 0 ? (opData.payout / 100) : 0.85;
-          const profit = prevAmount * payoutRate;
-          
-          state.nextAmount = Number((prevAmount + profit).toFixed(2));
-          logToConsole(`[Soros] WIN! Alavancando para nível ${state.currentSorosStage}. Próxima entrada: ${cur} ${state.nextAmount.toFixed(2)}`, 'success');
-        } else {
+        // Se a operação que acabou de vencer foi o Soros, voltamos para a mão base
+        if (Math.abs(prevAmount - sorosVal) < 0.05) {
           state.currentSorosStage = 0;
-          state.nextAmount = state.baseAmount;
+          state.nextAmount = entryVal;
           logToConsole(`[Soros] Ciclo de Soros finalizado com sucesso! Retornando para mão base: ${cur} ${state.nextAmount.toFixed(2)}`, 'success');
+        } else {
+          // Caso contrário, entra com a mão de Soros
+          state.currentSorosStage = 1;
+          state.nextAmount = sorosVal;
+          logToConsole(`[Soros] WIN! Aplicando mão de Soros na próxima operação: ${cur} ${state.nextAmount.toFixed(2)}`, 'success');
         }
       } else {
-        state.nextAmount = state.baseAmount;
+        state.currentSorosStage = 0;
+        state.nextAmount = entryVal;
+        logToConsole(`[Gestão] WIN! Retornando para mão base: ${cur} ${state.nextAmount.toFixed(2)}`, 'success');
       }
     } else if (opData.result === 'LOSS') {
       state.consecutiveLosses++;
+      state.currentSorosStage = 0; // Loss reseta o Soros
       
-      const maxGales = (settings.useMartingale && settings.martingales === 0) ? 1 : settings.martingales;
-      
-      if (settings.useMartingale && state.currentGale < maxGales) {
-        state.currentGale++;
+      const currentGaleForPair = state.currentGaleByPair[pairKey] || 0;
+      if (settings.useMartingale && currentGaleForPair < 1) {
+        // Aplica o Martingale de 1 nível com o valor fixo configurado
+        state.currentGaleByPair[pairKey] = 1;
+        state.currentGale = 1;
+        state.nextAmount = galeVal;
+        logToConsole(`[Martingale] LOSS! Aplicando Gale Fixo de ${cur} ${galeVal.toFixed(2)} na próxima vela do par ${opData.pair} (aguardando 4s para evitar bloqueio).`, 'warning');
         
-        // Fallback robusto se a corretora omitir o valor investido
-        const prevAmount = opData.amount > 0 ? opData.amount : state.nextAmount;
-        
-        state.nextAmount = Number((prevAmount * settings.galeFactor).toFixed(2));
-        logToConsole(`[Martingale] LOSS! Aplicando Gale nível ${state.currentGale} na próxima vela (aguardando 4s para evitar bloqueio da corretora).`, 'warning');
-        
-        // Disparar a operação do Gale com um atraso cirúrgico de 4s
-        // Muitas contas na corretora possuem uma trava anti-latência (delay) de até 3.5s no início de uma nova vela.
+        // Disparar a operação do Gale com delay de 4s passando galeVal como forcedAmount
         setTimeout(() => {
-          executeTradingOrder(opData.pair, opData.direction, opData.timeframe);
+          executeTradingOrder(opData.pair, opData.direction, opData.timeframe, galeVal);
         }, 4000);
       } else {
+        // Se já era o Gale e deu LOSS (limite atingido) ou se Martingale está desligado
+        state.currentGaleByPair[pairKey] = 0;
         state.currentGale = 0;
-        state.currentSorosStage = 0;
-        state.nextAmount = state.baseAmount;
-        if (settings.useMartingale && settings.martingales > 0) {
-          logToConsole(`[Martingale] LOSS! Limite de Gale atingido. Resetando para mão base: ${cur} ${state.nextAmount.toFixed(2)}`, 'error');
+        state.nextAmount = entryVal;
+        if (settings.useMartingale) {
+          logToConsole(`[Martingale] LOSS! Limite de 1 Gale atingido no par ${opData.pair}. Resetando para mão base: ${cur} ${state.nextAmount.toFixed(2)}`, 'error');
         } else {
-          logToConsole(`[Gestão] LOSS! Mão de recuperação não ativa. Retornando para mão base: ${cur} ${state.nextAmount.toFixed(2)}`, 'info');
+          logToConsole(`[Gestão] LOSS! Recuperação desativada. Retornando para mão base: ${cur} ${state.nextAmount.toFixed(2)}`, 'info');
         }
       }
     } else if (opData.result === 'DRAW' || opData.result === 'DRAWN') {
-      logToConsole(`[Gestão] Empate detectado. Repetindo a mesma entrada de: ${cur} ${opData.amount.toFixed(2)}`, 'info');
-      state.nextAmount = opData.amount;
+      logToConsole(`[Gestão] Empate detectado. Repetindo a mesma entrada de: ${cur} ${prevAmount.toFixed(2)}`, 'info');
+      state.nextAmount = prevAmount;
     } else {
-      state.nextAmount = state.baseAmount;
+      state.nextAmount = entryVal;
     }
 
     // 3. Checar Metas Globais e Limites Locais
@@ -937,7 +949,6 @@ const Bot = (() => {
       const metrics = Metrics.calculate(ops, dbSettings);
       const todayProfit = metrics.todayMetrics.netProfit;
       
-      const cur = dbSettings.currency === 'USD' ? '$' : 'R$';
       let blockReason = null;
       let blockType = 'error';
       
@@ -954,6 +965,7 @@ const Bot = (() => {
         document.getElementById('botToggle')?.click(); // Desliga o robô
       }
     }
+    syncRobotDataWithExtension();
   }
 
   // ---- Simulador e Captura de Mercado Real (API Binance) ----
@@ -1309,66 +1321,7 @@ const Bot = (() => {
     currentCandle.low = Math.min(currentCandle.low, simPrice);
   }
 
-  function updateMgmtFields() {
-    const useMartingale = document.getElementById('botUseMartingale')?.checked;
-    const useSoros = document.getElementById('botUseSoros')?.checked;
-    const useCycles = document.getElementById('botUseCycles')?.checked;
-    
-    const galeSettings = document.getElementById('mgmtMartingaleSettings');
-    const sorosSettings = document.getElementById('mgmtSorosSettings');
-    const cyclesSettings = document.getElementById('mgmtCyclesSettings');
 
-    if (galeSettings) {
-      galeSettings.style.display = useMartingale ? 'flex' : 'none';
-    }
-    if (sorosSettings) {
-      sorosSettings.style.display = useSoros ? 'block' : 'none';
-    }
-    if (cyclesSettings) {
-      cyclesSettings.style.display = useCycles ? 'block' : 'none';
-    }
-  }
-
-  function loadCyclesTable() {
-    const configText = settings.cyclesConfig || '';
-    const lines = configText.split('\n');
-    const parsedCycles = [];
-    
-    lines.forEach(line => {
-      if (!line.trim()) return;
-      const parts = line.split(':');
-      if (parts.length >= 2) {
-        const valuesStr = parts[1].split(',');
-        const values = valuesStr.map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
-        if (values.length > 0) {
-          parsedCycles.push(values);
-        }
-      } else {
-        const values = line.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
-        if (values.length > 0) {
-          parsedCycles.push(values);
-        }
-      }
-    });
-
-    state.cycles = parsedCycles;
-    if (state.cycles.length > 0) {
-      if (state.currentCycleIndex >= state.cycles.length) {
-        state.currentCycleIndex = 0;
-        state.currentStepIndex = 0;
-        state.inCyclesRecovery = false;
-      }
-      
-      if (settings.useCycles) {
-        state.nextAmount = state.cycles[state.currentCycleIndex][state.currentStepIndex];
-      }
-    } else {
-      state.cycles = [[settings.entryAmount]];
-      state.currentCycleIndex = 0;
-      state.currentStepIndex = 0;
-      state.inCyclesRecovery = false;
-    }
-  }
 
   async function fetchEconomicCalendar(force = false) {
     // Função removida a pedido do usuário
