@@ -1134,12 +1134,11 @@ const Bot = (() => {
       }
     }
 
-    const currentCandle = candles[candles.length - 1];
-    if (!currentCandle || !currentCandle.time) return;
-
-    // Evita entrar mais de 1 vez na mesma vela de sinal
-    const currentTickTime = currentCandle.time.getTime();
-    if (lastAutoPatternTimeByPair[pair] === currentTickTime) return;
+    // ========== GUARD ANTI-DUPLICATA ==========
+    // Usa o timestamp da ÚLTIMA VELA FECHADA (estável) em vez da vela aberta (que muda a cada tick).
+    // Isso garante que o mesmo padrão só será executado UMA vez por vela fechada.
+    const lastClosedTime = lastClosed.time.getTime();
+    if (lastAutoPatternTimeByPair[pair] === lastClosedTime) return;
 
     // Constrói a sequência das últimas velas fechadas
     let recentColors = '';
@@ -1156,7 +1155,7 @@ const Bot = (() => {
       // O Padrão no array (rule.pattern) está no formato GRG (ou GGG, etc)
       if (tailColors === rule.pattern) {
         logToConsole(`[Catalogador Dinâmico] Padrão ${rule.pattern} detectado em ${pair}! Entrando com ${rule.direction}`, 'success');
-        lastAutoPatternTimeByPair[pair] = currentTickTime;
+        lastAutoPatternTimeByPair[pair] = lastClosedTime;
 
         // Ativar cooldown se configurado
         if (settings.waitCycleBreak) {
