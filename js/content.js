@@ -262,7 +262,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
           if (visualAmountEl) {
             const valStr = Number.isInteger(Number(message.amount)) ? Number(message.amount).toString() : Number(message.amount).toFixed(2);
-            visualAmountEl.value = valStr;
+            const currentVal = String(visualAmountEl.value || "");
+            const finalValStr = currentVal.includes(',') ? valStr.replace('.', ',') : valStr;
+            visualAmountEl.value = finalValStr;
           }
         } catch(e) {}
 
@@ -385,7 +387,10 @@ async function executeTradingOrder(direction, amount) {
     amountEl.focus();
     try {
       const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      nativeInputValueSetter.call(amountEl, amount);
+      const valStr = Number.isInteger(Number(amount)) ? Number(amount).toString() : Number(amount).toFixed(2);
+      const currentVal = String(amountEl.value || "");
+      const finalValStr = currentVal.includes(',') ? valStr.replace('.', ',') : valStr;
+      nativeInputValueSetter.call(amountEl, finalValStr);
     } catch(e) {
       amountEl.value = amount; // Fallback
     }

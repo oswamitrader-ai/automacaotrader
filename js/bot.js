@@ -763,12 +763,15 @@ const Bot = (() => {
 
     let amount = forcedAmount !== null ? forcedAmount : Number(Number(state.nextAmount).toFixed(2));
     
-    // FORÇAR A LEITURA DO PAINEL SE FOR A PRIMEIRA ENTRADA (Evita dessincronização)
-    const currentGaleForPair = state.currentGaleByPair[pair] || 0;
-    if (currentGaleForPair === 0 && state.currentSorosStage === 0 && !state.inCyclesRecovery && forcedAmount === null) {
+    // FORÇAR A LEITURA DO PAINEL SE FOR A PRIMEIRA ENTRADA (Evita dessincronização) E ZERAR GALE PRESO
+    const isNewBaseEntry = (state.currentSorosStage === 0 && !state.inCyclesRecovery && forcedAmount === null);
+    if (isNewBaseEntry) {
+      state.currentGaleByPair[pair] = 0; // Limpa gale preso da sessão anterior
+      state.currentGale = 0;
       const uiAmountEl = document.getElementById('botEntryAmount');
       if (uiAmountEl) {
-        const uiAmount = parseFloat(uiAmountEl.value);
+        const rawVal = String(uiAmountEl.value || "").replace(',', '.');
+        const uiAmount = parseFloat(rawVal);
         if (!isNaN(uiAmount) && uiAmount > 0) {
           amount = Number(uiAmount.toFixed(2));
           state.baseAmount = amount; // Atualiza a base para garantir
@@ -873,11 +876,18 @@ const Bot = (() => {
       App.refresh();
     }
 
-    // 2. Aplicar nova gestão baseada em valores fixos
+    // 2. Aplicar nova gestão baseada em valores fixos (Lendo do DOM para evitar dessincronização)
     const cur = Storage.getSettings ? (Storage.getSettings().currency === 'USD' ? '$' : 'R$') : '$';
-    const entryVal = settings.entryAmount;
-    const galeVal = settings.galeAmount || (entryVal * 2.0);
-    const sorosVal = settings.sorosAmount || (entryVal * 1.8);
+    const el = (id) => document.getElementById(id);
+    const parseSafe = (val) => val ? parseFloat(String(val).replace(',', '.')) : NaN;
+    
+    const uiEntryAmount = el('botEntryAmount') ? parseSafe(el('botEntryAmount').value) : NaN;
+    const uiGaleAmount = el('botGaleAmount') ? parseSafe(el('botGaleAmount').value) : NaN;
+    const uiSorosAmount = el('botSorosAmount') ? parseSafe(el('botSorosAmount').value) : NaN;
+
+    const entryVal = (!isNaN(uiEntryAmount) && uiEntryAmount > 0) ? uiEntryAmount : settings.entryAmount;
+    const galeVal = (!isNaN(uiGaleAmount) && uiGaleAmount > 0) ? uiGaleAmount : (settings.galeAmount || (entryVal * 2.0));
+    const sorosVal = (!isNaN(uiSorosAmount) && uiSorosAmount > 0) ? uiSorosAmount : (settings.sorosAmount || (entryVal * 1.8));
     const prevAmount = opData.amount > 0 ? opData.amount : state.nextAmount;
 
     const pairKey = opData.pair;
