@@ -239,16 +239,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     };
 
     console.log("[Background] Transmitindo resultado instantâneo via WS:", opData);
+
+    // BUG 3 FIX: Sempre salvar no storage PRIMEIRO para garantir persistência,
+    // depois tentar entrega direta. Isso evita perda de resultado se a aba do
+    // dashboard não estiver pronta no momento exato do fechamento da operação.
+    savePendingOp(opData);
+
     if (dashboardTabId) {
       chrome.tabs.sendMessage(dashboardTabId, {
         action: "save_bot_operation",
         data: opData
+      }).then(() => {
+        // Entrega direta teve sucesso: remover do storage para não duplicar no próximo ping
+        chrome.storage.local.get({ pendingOps: [] }, (r) => {
+          const filtered = (r.pendingOps || []).filter(op =>
+            !(op.notes && opData.notes && op.notes === opData.notes && op.pair === opData.pair && op.result === opData.result)
+          );
+          chrome.storage.local.set({ pendingOps: filtered });
+        });
       }).catch((err) => {
-        console.warn("[Background] Falha ao enviar opData para dashboardTabId. Salvando no storage local.", err);
-        savePendingOp(opData);
+        console.warn("[Background] Entrega direta falhou, op já está no storage para o próximo ping.", err);
+        // Já está no storage — o próximo ping do dashboard vai buscá-la
       });
-    } else {
-      savePendingOp(opData);
     }
     sendResponse({ status: "success" });
     return true;
@@ -641,6 +653,7 @@ function notifyDashboardStatus() {
 function getActiveIdForOTC(pair) {
   const ids = {
     // OTC Pairs
+    'BTC/USD-OTC': 811,
     'EUR/USD-OTC': 76,
     'GBP/USD-OTC': 77,
     'EUR/GBP-OTC': 79,
@@ -664,6 +677,7 @@ function getActiveIdForOTC(pair) {
     'AUD/CHF-OTC': 178,
     'CAD/CHF-OTC': 179,
     // Real Pairs
+    'BTC/USD': 810,
     'EUR/USD': 1,
     'GBP/USD': 2,
     'USD/JPY': 3,
@@ -703,6 +717,7 @@ function getTimeframeSeconds(tf) {
 function getPairForActiveId(activeId) {
   const pairs = {
     // OTC Pairs
+    811: 'BTC/USD-OTC',
     76: 'EUR/USD-OTC',
     77: 'GBP/USD-OTC',
     79: 'EUR/GBP-OTC',
@@ -726,6 +741,7 @@ function getPairForActiveId(activeId) {
     178: 'AUD/CHF-OTC',
     179: 'CAD/CHF-OTC',
     // Real Pairs
+    810: 'BTC/USD',
     1: 'EUR/USD',
     2: 'GBP/USD',
     3: 'USD/JPY',

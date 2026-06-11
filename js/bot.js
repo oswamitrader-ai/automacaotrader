@@ -322,8 +322,14 @@ const Bot = (() => {
       if (!line.trim()) return;
       const parts = line.split(';');
       if (parts.length >= 4) {
+        let rawPattern = parts[0].trim();
+        rawPattern = rawPattern.replace(/🟩/g, 'G').replace(/🟥/g, 'R')
+                               .replace(/verde/gi, 'G').replace(/vermelh[ao]/gi, 'R')
+                               .toUpperCase()
+                               .replace(/[^GR]/g, '');
+        if (rawPattern.length === 0) return;
         patterns.push({
-          pattern: parts[0].trim(),
+          pattern: rawPattern,
           pair: parts[1].trim(),
           direction: parts[2].trim().toUpperCase(),
           timeframe: parts[3].trim().toUpperCase()
@@ -445,11 +451,13 @@ const Bot = (() => {
 
   function runBotTick() {
     if (!settings.active) return;
-    syncRobotDataWithExtension();
     
+    // BUG 2 FIX: Executar a análise de sinais ANTES do sync com a extensão.
+    // O syncRobotDataWithExtension() é assíncrono e introduzia ~3s de latência
+    // porque o chrome.runtime.sendMessage bloqueava a thread antes do checkSignalsList.
     const now = new Date();
     
-    // 1. Estratégia de Lista de Sinais
+    // 1. Estratégia de Lista de Sinais — executar com prioridade máxima
     if (settings.strategy === 'signals_list') {
       checkSignalsList(now);
     }
@@ -458,6 +466,9 @@ const Bot = (() => {
     if (now.getSeconds() === 0) { // Executa análise na abertura da nova vela (segundo 0)
       runAutomaticStrategies(now);
     }
+
+    // 3. Sync com a extensão DEPOIS da análise (não bloqueia a detecção do sinal)
+    syncRobotDataWithExtension();
   }
 
   function stopBotEngine() {
@@ -761,23 +772,35 @@ const Bot = (() => {
       }
     }
 
-    let amount = forcedAmount !== null ? forcedAmount : Number(Number(state.nextAmount).toFixed(2));
-    
+    // BUG 1 FIX: Ler SEMPRE os valores do painel antes de qualquer decisão de amount.
+    // Isso garante que o robô use os valores digitados pelo usuário, nunca o valor da corretora.
+    const uiEntryEl   = document.getElementById('botEntryAmount');
+    const uiGaleEl    = document.getElementById('botGaleAmount');
+    const uiSorosEl   = document.getElementById('botSorosAmount');
+    const parseSafe   = (el) => { const v = parseFloat(String(el ? el.value : '').replace(',','.')); return (!isNaN(v) && v > 0) ? v : null; };
+    const uiEntry  = parseSafe(uiEntryEl)  || settings.entryAmount;
+    const uiGale   = parseSafe(uiGaleEl)   || settings.galeAmount  || (uiEntry * 2.0);
+    const uiSoros  = parseSafe(uiSorosEl)  || settings.sorosAmount || (uiEntry * 1.8);
+
+    // Manter settings e state sempre em sincronia com o DOM
+    settings.entryAmount = uiEntry;
+    settings.galeAmount  = uiGale;
+    settings.sorosAmount = uiSoros;
+
     // FORÇAR A LEITURA DO PAINEL SE FOR A PRIMEIRA ENTRADA (Evita dessincronização) E ZERAR GALE PRESO
     const isNewBaseEntry = (state.currentSorosStage === 0 && !state.inCyclesRecovery && forcedAmount === null);
     if (isNewBaseEntry) {
       state.currentGaleByPair[pair] = 0; // Limpa gale preso da sessão anterior
       state.currentGale = 0;
-      const uiAmountEl = document.getElementById('botEntryAmount');
-      if (uiAmountEl) {
-        const rawVal = String(uiAmountEl.value || "").replace(',', '.');
-        const uiAmount = parseFloat(rawVal);
-        if (!isNaN(uiAmount) && uiAmount > 0) {
-          amount = Number(uiAmount.toFixed(2));
-          state.baseAmount = amount; // Atualiza a base para garantir
-          state.nextAmount = amount; // Atualiza o nextAmount também para o fallback do Gale
-        }
-      }
+      state.baseAmount  = uiEntry;
+      state.nextAmount  = uiEntry;
+    }
+
+    let amount = forcedAmount !== null ? Number(Number(forcedAmount).toFixed(2)) : Number(Number(state.nextAmount).toFixed(2));
+
+    // Segurança final: se por qualquer motivo o amount ainda for 0 ou NaN, usa o valor do painel
+    if (!amount || isNaN(amount) || amount <= 0) {
+      amount = Number(uiEntry.toFixed(2));
     }
 
     const cur = Storage.getSettings().currency === 'USD' ? '$' : 'R$';
@@ -882,12 +905,19 @@ const Bot = (() => {
     const parseSafe = (val) => val ? parseFloat(String(val).replace(',', '.')) : NaN;
     
     const uiEntryAmount = el('botEntryAmount') ? parseSafe(el('botEntryAmount').value) : NaN;
-    const uiGaleAmount = el('botGaleAmount') ? parseSafe(el('botGaleAmount').value) : NaN;
+    const uiGaleAmount  = el('botGaleAmount')  ? parseSafe(el('botGaleAmount').value)  : NaN;
     const uiSorosAmount = el('botSorosAmount') ? parseSafe(el('botSorosAmount').value) : NaN;
 
     const entryVal = (!isNaN(uiEntryAmount) && uiEntryAmount > 0) ? uiEntryAmount : settings.entryAmount;
-    const galeVal = (!isNaN(uiGaleAmount) && uiGaleAmount > 0) ? uiGaleAmount : (settings.galeAmount || (entryVal * 2.0));
+    const galeVal  = (!isNaN(uiGaleAmount)  && uiGaleAmount  > 0) ? uiGaleAmount  : (settings.galeAmount  || (entryVal * 2.0));
     const sorosVal = (!isNaN(uiSorosAmount) && uiSorosAmount > 0) ? uiSorosAmount : (settings.sorosAmount || (entryVal * 1.8));
+
+    // BUG 3 FIX: Manter settings sincronizados com o DOM para que a próxima ordem use o valor certo
+    settings.entryAmount = entryVal;
+    settings.galeAmount  = galeVal;
+    settings.sorosAmount = sorosVal;
+    state.baseAmount     = entryVal;
+
     const prevAmount = opData.amount > 0 ? opData.amount : state.nextAmount;
 
     const pairKey = opData.pair;
@@ -994,8 +1024,18 @@ const Bot = (() => {
     lines.forEach(line => {
       const parts = line.split(';');
       if (parts.length >= 4) {
+        // Normalizar emojis (🟩🟥) e variantes para letras G/R que o motor usa internamente
+        let rawPattern = parts[0].trim();
+        rawPattern = rawPattern.replace(/🟩/g, 'G').replace(/🟥/g, 'R')
+                               .replace(/verde/gi, 'G').replace(/vermelh[ao]/gi, 'R')
+                               .toUpperCase();
+        // Remover qualquer caractere que não seja G ou R (espaços, vírgulas, etc)
+        rawPattern = rawPattern.replace(/[^GR]/g, '');
+        
+        if (rawPattern.length === 0) return; // Padrão inválido, pula
+        
         patterns.push({
-          pattern: parts[0].trim(),
+          pattern: rawPattern,
           pair: parts[1].trim(),
           direction: parts[2].trim().toUpperCase(),
           timeframe: parts[3].trim().toUpperCase()

@@ -1,4 +1,4 @@
-// ============================================
+﻿// ============================================
 // INJECTED SCRIPT - Runs in MAIN World
 // Intercepta WebSockets da corretora e expõe
 // as conexões ativas em window.__binaryOps_ws
@@ -226,8 +226,8 @@
             const activeIdMatches = String(activeId) === String(lastOrder.activeId);
             const directionMatches = dir === lastOrder.direction.toLowerCase();
             
-            // Se foi enviada há menos de 20 segundos
-            if (activeIdMatches && directionMatches && timeSinceOrder < 20000) {
+            // Se foi enviada há menos de 90 segundos (cobre M1 inteiro + margem)
+            if (activeIdMatches && directionMatches && timeSinceOrder < 90000) {
               console.log(`[BinaryOps WS Received][OptionOpened] Associando ID ${optId} à ordem recente do robô!`);
               window.__binaryOps_openedOptionIds.add(optId);
             }
@@ -616,3 +616,4 @@
   });
 
 })();
+

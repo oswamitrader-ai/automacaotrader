@@ -1,4 +1,4 @@
-// ============================================
+﻿// ============================================
 // CONTENT SCRIPT - Injected in Broker Sites
 // ============================================
 
@@ -237,6 +237,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     let wsResponded = false;
     let wsTimeout = null;
 
+    let wsOrderAlreadySent = false;
+    window.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'binaryops_order_sent' && e.data.requestId === wsRequestId) {
+        wsOrderAlreadySent = true;
+      }
+    });
     const wsResultHandler = (event) => {
       if (!event.data || event.data.type !== 'binaryops_order_result') return;
       if (event.data.requestId !== wsRequestId) return;
@@ -303,6 +309,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (!wsResponded) {
         wsResponded = true;
         window.removeEventListener('message', wsResultHandler);
+        if (wsOrderAlreadySent) { sendResponse({ status: "success", msg: "Ordem ja enviada via WS (timeout)" }); return; }
         console.warn("[BinaryOps Content Script] Timeout WS. Tentando fallback físico...");
         
         notifyPhysicalOrder();
@@ -1499,3 +1506,4 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 })(); // End of IIFE
+
