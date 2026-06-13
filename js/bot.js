@@ -1008,14 +1008,7 @@ const Bot = (() => {
     syncRobotDataWithExtension();
   }
 
-  // ---- Simulador e Captura de Mercado Real (API Binance) ----
-
-  const BINANCE_SYMBOLS = {
-    'EUR/USD': 'EURUSDT',
-    'GBP/USD': 'GBPUSDT',
-    'USD/JPY': 'USDJPY', // Alguns podem não estar nativos, mas usamos proxy
-    'AUD/USD': 'AUDUSDT',
-  };
+  // ---- Simulador e Captura de Mercado Real (Corretora via Extensão) ----
 
   function parsePatternsList() {
     const raw = document.getElementById('botPatternsList')?.value || '';
@@ -1086,13 +1079,8 @@ const Bot = (() => {
       }
 
       await Promise.all(targets.map(async (target) => {
-        const isOTC = target.pair.endsWith('-OTC');
-        const symbol = BINANCE_SYMBOLS[target.pair];
-        
-        // Se for par OTC ou não tiver suporte na Binance, buscar da corretora via extensão
-        if (isOTC || !symbol) {
-          if (isExtensionAvailable) {
-            try {
+        if (isExtensionAvailable) {
+          try {
               // Solicitar candles da corretora através do background
               const response = await new Promise((resolve) => {
                 chrome.runtime.sendMessage({
@@ -1125,49 +1113,6 @@ const Bot = (() => {
               // Silenciar erros de comunicação periódica
             }
           }
-          return;
-        }
-
-        // Se for par normal da Binance, buscar via API Binance
-        try {
-          const limit = settings.strategy === 'price_action' ? 50 : 10;
-          const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${target.interval}&limit=${limit}`);
-          const data = await res.json();
-          
-          if (data && data.length > 0) {
-            const newCandles = data.map(k => ({
-              time: new Date(k[0]),
-              open: parseFloat(k[1]),
-              high: parseFloat(k[2]),
-              low: parseFloat(k[3]),
-              close: parseFloat(k[4]),
-              isClosed: k[6] < Date.now()
-            }));
-            
-            // Retrocompatibilidade para single-pair
-            if (targets.length === 1) {
-              state.simulatedCandles = newCandles;
-            }
-            
-            if (settings.strategy === 'auto_pattern') {
-              runAutoPatternEngine(target.pair, newCandles, activePatterns);
-            } else if (settings.strategy === 'price_action') {
-              runPriceActionEngine(newCandles, target.pair, target.interval);
-            } else {
-              // Log heartbeat para estratégias single
-              const now = new Date();
-              if (now.getSeconds() === 0) {
-                 const lastClosed = newCandles[newCandles.length - 2]; 
-                 if (lastClosed) {
-                   const cType = lastClosed.close >= lastClosed.open ? 'VERDE' : 'VERMELHA';
-                   console.log(`[Mercado Real] Vela fechada em ${target.pair}: ${lastClosed.close.toFixed(5)} (${cType})`);
-                 }
-              }
-            }
-          }
-        } catch (err) {
-          // Silent catch to prevent console flood
-        }
       }));
     }, 2000); // Poll a cada 2s
   }

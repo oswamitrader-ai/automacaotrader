@@ -1,4 +1,4 @@
-﻿// ============================================
+// ============================================
 // INJECTED SCRIPT - Runs in MAIN World
 // Intercepta WebSockets da corretora e expõe
 // as conexões ativas em window.__binaryOps_ws
@@ -24,7 +24,10 @@
     if (window.__binaryOps_dynamicIds) {
       for (const [pair, id] of Object.entries(window.__binaryOps_dynamicIds)) {
         if (String(id) === String(activeId)) {
-          return pair;
+          let resolved = pair;
+          if (resolved === 'BITCOIN-OTC' || resolved === 'BITCOIN(OTC)') resolved = 'BTC/USD-OTC';
+          if (resolved === 'BITCOIN') resolved = 'BTC/USD';
+          return resolved;
         }
       }
     }
@@ -56,9 +59,20 @@
   function getActiveIdByPair(pair) {
     if (!pair) return null;
     if (window.__binaryOps_dynamicIds) {
-      const cleanPair = pair.replace(' ', '').toUpperCase();
-      if (window.__binaryOps_dynamicIds[cleanPair]) {
-        return window.__binaryOps_dynamicIds[cleanPair];
+      const cleanPair = pair.replace(/[ /]/g, '').toUpperCase();
+      const possibleNames = [pair, cleanPair, cleanPair.replace('-OTC', 'OTC')];
+      
+      if (pair.includes('BTC')) {
+         possibleNames.push('BITCOIN');
+         possibleNames.push('BITCOIN-OTC');
+         possibleNames.push('BITCOIN(OTC)');
+         possibleNames.push('BTC');
+      }
+      
+      for (let name of possibleNames) {
+         if (window.__binaryOps_dynamicIds[name]) {
+           return window.__binaryOps_dynamicIds[name];
+         }
       }
     }
     const staticIds = {
@@ -426,6 +440,13 @@
       pairVariations.push(pair + '-OTC');
       pairVariations.push(pair + ' (OTC)');
     }
+
+    if (pair.includes('BTC')) {
+      pairVariations.push('BITCOIN');
+      pairVariations.push('BITCOIN-OTC');
+      pairVariations.push('BITCOIN(OTC)');
+      pairVariations.push('BTC');
+    }
     
     for (let variant of pairVariations) {
       const cleanVariant = variant.replace(/[() ]/g, '').toUpperCase();
@@ -454,7 +475,8 @@
         'AUD/JPY-OTC': 168, 'EUR/AUD-OTC': 169, 'EUR/CAD-OTC': 170,
         'GBP/AUD-OTC': 171, 'GBP/CAD-OTC': 172, 'GBP/CHF-OTC': 173,
         'NZD/JPY-OTC': 174, 'CAD/JPY-OTC': 175, 'CHF/JPY-OTC': 176,
-        'EUR/CHF-OTC': 177, 'AUD/CHF-OTC': 178, 'CAD/CHF-OTC': 179
+        'EUR/CHF-OTC': 177, 'AUD/CHF-OTC': 178, 'CAD/CHF-OTC': 179,
+        'BTC/USD': 810, 'BTC/USD-OTC': 808
       };
       activeId = staticIds[pair];
     }
@@ -524,10 +546,9 @@
       if (!responded) {
         responded = true;
         openWs.removeEventListener('message', responseHandler);
-        // Timeout rápido de 1.5s para forçar o clique físico sem atrasar a vela
-        window.postMessage({ type: 'binaryops_order_result', requestId, status: 'error', error: 'Timeout WS (1.5s).' }, '*');
+        window.postMessage({ type: 'binaryops_order_result', requestId, status: 'error', error: 'Timeout WS (5.0s).' }, '*');
       }
-    }, 1500);
+    }, 5000);
 
     const responseHandler = async (event) => {
       if (responded) return;
@@ -568,7 +589,8 @@
           } else {
             // Respondeu ao request_id mas sem optionId. Isso quase sempre é uma rejeição silenciosa!
             console.warn(`[BinaryOps Interceptor] Resposta vaga da corretora, tratando como falha para agilizar fallback:`, data);
-            window.postMessage({ type: 'binaryops_order_result', requestId, status: 'error', error: 'Corretora não confirmou o ID da transação.' }, '*');
+            const rawResponse = JSON.stringify(data.msg || data);
+            window.postMessage({ type: 'binaryops_order_result', requestId, status: 'error', error: `Rejeição Silenciosa: ${rawResponse}` }, '*');
           }
         }
         // Resposta via broadcast de abertura de opção da corretora

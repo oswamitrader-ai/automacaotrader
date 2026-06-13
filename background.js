@@ -289,7 +289,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const targetTabId = brokerTabsList[0];
     const isOTC = message.pair.endsWith('-OTC');
     const marketLabel = isOTC ? 'OTC' : 'Mercado Real';
-    console.log(`[Background] Solicitando candles do ${marketLabel} para ${message.pair} (fallback ID ${activeId}) via executeScript na aba ${targetTabId}`);
+    // console.log(`[Background] Solicitando candles do ${marketLabel} para ${message.pair} (fallback ID ${activeId}) via executeScript na aba ${targetTabId}`);
     
     // Executa uma função async diretamente no MAIN world em todos os frames da aba da corretora
     chrome.scripting.executeScript({
@@ -298,11 +298,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       func: (fallbackActiveId, size, to, count, pairName) => {
         return new Promise((resolve) => {
           let activeId = fallbackActiveId;
-          if (window.__binaryOps_dynamicIds && window.__binaryOps_dynamicIds[pairName]) {
-             activeId = window.__binaryOps_dynamicIds[pairName];
-             console.log(`[BinaryOps] Sucesso! Usando NOVO ID Dinâmico Mapeado para ${pairName}: ${activeId}`);
-          } else {
-             console.log(`[BinaryOps] Nenhum ID novo detectado para ${pairName}, tentando usar o ID antigo: ${fallbackActiveId}`);
+          const cleanPairName = pairName.replace(/[ /]/g, '').toUpperCase();
+          const possibleNames = [pairName, cleanPairName, cleanPairName.replace('-OTC', 'OTC')];
+          
+          if (pairName.includes('BTC')) {
+             possibleNames.push('BITCOIN');
+             possibleNames.push('BITCOIN-OTC');
+             possibleNames.push('BITCOIN(OTC)');
+             possibleNames.push('BTC');
+          }
+          
+          if (window.__binaryOps_dynamicIds) {
+             for (let name of possibleNames) {
+                if (window.__binaryOps_dynamicIds[name]) {
+                   activeId = window.__binaryOps_dynamicIds[name];
+                   console.log(`[BinaryOps] Sucesso! Usando NOVO ID Dinâmico Mapeado para ${name}: ${activeId}`);
+                   break;
+                }
+             }
+          }
+          
+          if (activeId === fallbackActiveId) {
+             console.log(`[BinaryOps] Nenhum ID dinâmico detectado para ${pairName}, tentando usar o ID antigo: ${fallbackActiveId}`);
           }
 
           const reqId = `binaryops_${activeId}_${Date.now()}`;
@@ -353,7 +370,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
               }
 
-              resolve({ status: "error", error: `Timeout de 20s aguardando a corretora.` });
+              resolve({ status: "error", error: `Timeout de 20s aguardando a corretora. Não foi possível baixar as velas. Solução: ABRA O GRÁFICO do ativo ${pairName} na corretora e tente catalogar novamente.` });
             }
           }, 20000);
 
@@ -391,13 +408,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               clearTimeout(timeoutId);
               
               // FALLBACK SUPREMO: Se tudo falhar, devolve as velas que foram interceptadas quando o usuário abriu o gráfico!
-              if (window.__binaryOps_stolenCandles && window.__binaryOps_stolenCandles[activeId] && window.__binaryOps_stolenCandles[activeId].length > 0) {
-                 console.log(`[BinaryOps] Todos os formatos falharam. Usando as ${window.__binaryOps_stolenCandles[activeId].length} velas ROUBADAS diretamente do gráfico!`);
-                 resolve({ status: "success", candles: window.__binaryOps_stolenCandles[activeId], frameId: 0 });
-                 return;
+              if (window.__binaryOps_stolenCandles) {
+                 if (window.__binaryOps_stolenCandles[activeId] && window.__binaryOps_stolenCandles[activeId].length > 0) {
+                    console.log(`[BinaryOps] Todos os formatos falharam. Usando as ${window.__binaryOps_stolenCandles[activeId].length} velas ROUBADAS diretamente do gráfico (ID: ${activeId})!`);
+                    resolve({ status: "success", candles: window.__binaryOps_stolenCandles[activeId], frameId: 0 });
+                    return;
+                 }
+                 
+                 // Procurar o maior array de velas (o gráfico que o usuário acabou de abrir)
+                 let bestId = null;
+                 let maxLen = 0;
+                 for (let cid in window.__binaryOps_stolenCandles) {
+                    if (window.__binaryOps_stolenCandles[cid].length > maxLen) {
+                       maxLen = window.__binaryOps_stolenCandles[cid].length;
+                       bestId = cid;
+                    }
+                 }
+                 if (bestId && maxLen > 0) {
+                    console.log(`[BinaryOps] TIMEOUT DOS FORMATOS! Usando velas roubadas do gráfico ativo na tela (ID real=${bestId})!`);
+                    resolve({ status: "success", candles: window.__binaryOps_stolenCandles[bestId], frameId: 0 });
+                    return;
+                 }
               }
               
-              resolve({ status: "error", error: "A corretora bloqueou a busca. Por favor, deixe o gráfico deste ativo aberto na corretora por alguns segundos antes de catalogar." });
+              resolve({ status: "error", error: "A corretora bloqueou a busca e não detectou o ativo na tela. Certifique-se de estar com a aba do ativo selecionada na corretora." });
               return;
             }
 
@@ -408,6 +442,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               request_id: historyReqId,
               msg: reqFmt
             };
+            
+            let formatTimeoutId = setTimeout(() => {
+               if (resolved) return;
+               openSockets.forEach(ws => ws.removeEventListener('message', histHandler));
+               tryFetch(formatIndex + 1);
+            }, 1500);
             
             const histHandler = async (event) => {
               if (resolved) return;
@@ -441,9 +481,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 const respReqId = data.request_id || (data.msg && data.msg.request_id) || '';
 
                 if (msgName === "error" && String(respReqId) === String(historyReqId)) {
+                   clearTimeout(formatTimeoutId);
                    openSockets.forEach(ws => ws.removeEventListener('message', histHandler));
                    tryFetch(formatIndex + 1);
                 } else if (msgName === "candles" && String(respReqId) === String(historyReqId)) {
+                  clearTimeout(formatTimeoutId);
                   openSockets.forEach(ws => ws.removeEventListener('message', histHandler));
                   
                   let candles = null;
@@ -514,11 +556,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           });
           
           // Debugging log para ver se as velas estão sendo mapeadas corretamente e não apenas com cor R
-          if (mappedCandles.length > 0) {
-            console.log(`[Background] 1a vela amostra: time=${mappedCandles[0].time}, open=${mappedCandles[0].open}, close=${mappedCandles[0].close}, color=${mappedCandles[0].color}`);
-          }
+          // if (mappedCandles.length > 0) {
+          //   console.log(`[Background] 1a vela amostra: time=${mappedCandles[0].time}, open=${mappedCandles[0].open}, close=${mappedCandles[0].close}, color=${mappedCandles[0].color}`);
+          // }
           
-          console.log(`[Background] ${mappedCandles.length} candles mapeados com sucesso a partir do frame ${successfulResult.frameId}.`);
+          // console.log(`[Background] ${mappedCandles.length} candles mapeados com sucesso a partir do frame ${successfulResult.frameId}.`);
           sendResponse({ status: "success", candles: mappedCandles });
         } else {
           // Se nenhum deu sucesso, coletar os erros
@@ -742,6 +784,7 @@ function getPairForActiveId(activeId) {
     179: 'CAD/CHF-OTC',
     // Real Pairs
     810: 'BTC/USD',
+    808: 'BTC/USD-OTC',
     1: 'EUR/USD',
     2: 'GBP/USD',
     3: 'USD/JPY',

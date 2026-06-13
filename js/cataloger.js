@@ -4,21 +4,6 @@
 
 const Cataloger = (() => {
   
-  const BINANCE_SYMBOLS = {
-    'EUR/USD': 'EURUSDT',
-    'GBP/USD': 'GBPUSDT',
-    'AUD/USD': 'AUDUSDT',
-    'NZD/USD': 'NZDUSDT',
-  };
-
-  function getIdealCandleCount(timeframe) {
-    const tf = (timeframe || '1m').toLowerCase();
-    if (tf === '1m') return 300;
-    if (tf === '5m') return 800;
-    if (tf === '15m') return 500;
-    return 300;
-  }
-
   let bestSignalsFound = []; // Array of { timeStr, pair, direction, timeframe }
   let bestPatternsFound = []; // Array of { rawPattern, pair, direction, timeframe }
   let lastFetchedCandles = [];
@@ -135,117 +120,46 @@ const Cataloger = (() => {
     document.getElementById('btnTestAllSignals')?.addEventListener('click', testAllSignals);
   }
 
+  function getIdealCandleCount(timeframe) {
+    const tf = (timeframe || '1m').toLowerCase();
+    if (tf === '1m') return 300;
+    if (tf === '5m') return 800;
+    if (tf === '15m') return 500;
+    return 300;
+  }
+
   async function fetchHistoricalCandles(pair, timeframe) {
-    const isOTC = pair.endsWith('-OTC');
-    const basePair = isOTC ? pair.replace('-OTC', '') : pair;
     const limitInput = document.getElementById('catCandleLimit');
     const limit = limitInput ? parseInt(limitInput.value) || getIdealCandleCount(timeframe) : getIdealCandleCount(timeframe);
 
     const isExtensionAvailable = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage;
     
-    // Tenta primeiro capturar da corretora via extensão (para obter dados reais da IQ Option/Exnova)
-    if (isExtensionAvailable) {
-      return new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage({
-          action: "fetch_otc_candles",
-          pair: pair,
-          timeframe: timeframe,
-          limit: limit
-        }, (response) => {
-          if (response && response.status === "success") {
-            const sortedCandles = [...response.candles].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
-            const candlesMapped = sortedCandles.map(c => ({
-              ...c,
-              time: new Date(c.time)
-            }));
-            resolve(candlesMapped);
-          } else {
-            if (isOTC) {
-              reject(new Error(response ? response.error : "Falha ao obter candles de OTC via extensão. Verifique se o ativo está aberto no gráfico da corretora."));
-            } else {
-              const brokerError = response ? response.error : "Erro de comunicação com a extensão";
-              console.warn("Falha ao obter do broker via extensão:", brokerError);
-              
-              fetchFromExternalAPIs(basePair, timeframe, limit)
-                .then(resolve)
-                .catch(err => {
-                  reject(new Error(`Falha na Corretora: "${brokerError}" | Twelve Data: "${err.message}"`));
-                });
-            }
-          }
-        });
-      });
+    if (!isExtensionAvailable) {
+      throw new Error(`A extensão do Chrome precisa estar ativa e em execução para capturar os dados reais da corretora.`);
     }
 
-    if (isOTC) {
-      throw new Error(`A extensão do Chrome precisa estar ativa e em execução para capturar os dados reais de OTC diretamente da corretora.`);
-    }
-
-    return fetchFromExternalAPIs(basePair, timeframe, limit);
-  }
-
-  async function fetchFromExternalAPIs(basePair, timeframe, limit) {
-    const settings = Storage.getSettings ? Storage.getSettings() : {};
-    const tdKey = settings.sysTwelveDataKey || settings.twelveDataKey || document.getElementById('sysTwelveDataKey')?.value?.trim();
-    let tdTimeframe = timeframe.replace('m', 'min');
-    let candles = [];
-
-    if (!tdKey) {
-      throw new Error(`Twelve Data API Key não configurada. Cadastre sua chave nas configurações para obter dados históricos do mercado real ou abra o gráfico do ativo na corretora.`);
-    }
-
-    try {
-      const isExtensionAvailable = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage;
-      if (isExtensionAvailable) {
-        const response = await new Promise((resolve, reject) => {
-          chrome.runtime.sendMessage({
-            action: "fetch_twelvedata_candles",
-            symbol: basePair,
-            interval: tdTimeframe,
-            limit: limit,
-            apiKey: tdKey
-          }, (res) => {
-            if (res && res.status === "success") resolve(res.data);
-            else reject(new Error(res ? res.error : "Chave ou limite da Twelve Data excedido"));
-          });
-        });
-
-        if (response && response.values && response.values.length > 0) {
-          const values = response.values;
-          candles = values.map(k => {
-            const dtStr = k.datetime.includes('T') ? k.datetime : k.datetime.replace(' ', 'T');
-            const utcStr = dtStr.endsWith('Z') ? dtStr : dtStr + 'Z';
-            return {
-              time: new Date(utcStr),
-              open: parseFloat(k.open),
-              high: parseFloat(k.high),
-              low: parseFloat(k.low),
-              close: parseFloat(k.close),
-              color: parseFloat(k.close) >= parseFloat(k.open) ? 'G' : 'R'
-            };
-          });
-
-          if (candles.length > 0) {
-            const lastCandle = candles[candles.length - 1];
-            const tfMinutes = tdTimeframe === '1min' ? 1 : tdTimeframe === '5min' ? 5 : 15;
-            const candleCloseTime = new Date(lastCandle.time.getTime() + tfMinutes * 60 * 1000);
-            if (candleCloseTime.getTime() > Date.now()) {
-              candles.pop();
-            }
-          }
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({
+        action: "fetch_otc_candles",
+        pair: pair,
+        timeframe: timeframe,
+        limit: limit
+      }, (response) => {
+        if (response && response.status === "success") {
+          const sortedCandles = [...response.candles].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+          const candlesMapped = sortedCandles.map(c => ({
+            ...c,
+            time: new Date(c.time)
+          }));
+          resolve(candlesMapped);
+        } else {
+          reject(new Error(response ? response.error : "Falha ao obter velas via extensão. Verifique se o ativo está aberto no gráfico da corretora."));
         }
-      }
-    } catch (e) {
-      console.error('Erro na Twelve Data:', e);
-      throw new Error(`Erro Twelve Data: ${e.message}. Para obter dados de forma gratuita e precisa, certifique-se de que a aba da corretora está ativa com este ativo aberto.`);
-    }
-
-    if (candles.length === 0) {
-      throw new Error(`Nenhum dado retornado da Twelve Data para ${basePair}. Verifique os limites da chave ou abra o gráfico do ativo na corretora.`);
-    }
-
-    return candles;
+      });
+    });
   }
+
+
 
   // Análise por Minuto da Hora (Modo Tempo)
   function analyzeByTime(candles, pair, timeframe) {

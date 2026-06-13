@@ -1,4 +1,4 @@
-﻿// ============================================
+// ============================================
 // CONTENT SCRIPT - Injected in Broker Sites
 // ============================================
 
@@ -278,11 +278,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       } else {
         console.warn(`[BinaryOps Content Script] ⚠️ Falha na execução via WS: ${event.data.error}. Tentando fallback físico (DOM/Coordenadas)...`);
         
+        // Validação de Segurança Extrema: Garantir que a aba visual é a mesma do par solicitado!
+        const isCurrentTabOnPair = (expectedPair) => {
+          if (!expectedPair) return true;
+          const cleanExpected = expectedPair.replace(/[-/() ]/g, '').toUpperCase();
+          const cleanExpectedNoOTC = cleanExpected.replace('OTC', '');
+          const url = window.location.href.replace(/[-/() ]/g, '').toUpperCase();
+          const title = document.title.replace(/[-/() ]/g, '').toUpperCase();
+          
+          if (url.includes(cleanExpected) || title.includes(cleanExpected)) return true;
+          
+          if (url.includes(cleanExpectedNoOTC) || title.includes(cleanExpectedNoOTC)) {
+            if (cleanExpected.includes('OTC') && !title.includes('OTC') && !document.body.innerText.includes('OTC')) {
+              return false;
+            }
+            return true;
+          }
+          return false;
+        };
+
+        if (!isCurrentTabOnPair(message.pair)) {
+           console.error(`[BinaryOps Content Script] 🚨 ABORTANDO CLIQUE FÍSICO! O sinal era para ${message.pair}, mas a aba atual parece estar em outro ativo. O clique físico compraria o ativo errado!`);
+           sendResponse({ status: "error", error: `Aba incorreta para clique físico. Sinal era para: ${message.pair}` });
+           return;
+        }
+
         notifyPhysicalOrder();
         executeTradingOrder(message.direction, message.amount)
           .then(() => {
             console.log(`[BinaryOps Content Script] ✅ Ordem executada via fallback físico.`);
-            sendResponse({ status: "success", msg: "Ordem executada via clique físico após falha no WS" });
+            monitorOperationResult(message.direction, message.amount, message.pair, message.timeframe);
+            sendResponse({ status: "success", msg: `Ordem executada via clique físico após falha no WS (${event.data.error})` });
           })
           .catch((domErr) => {
             console.error(`[BinaryOps Content Script] 🚨 Falha no fallback físico também:`, domErr);
@@ -312,10 +338,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (wsOrderAlreadySent) { sendResponse({ status: "success", msg: "Ordem ja enviada via WS (timeout)" }); return; }
         console.warn("[BinaryOps Content Script] Timeout WS. Tentando fallback físico...");
         
+        // Validação de Segurança Extrema para o Timeout
+        const isCurrentTabOnPairTimeout = (expectedPair) => {
+          if (!expectedPair) return true;
+          const cleanExpected = expectedPair.replace(/[-/() ]/g, '').toUpperCase();
+          const cleanExpectedNoOTC = cleanExpected.replace('OTC', '');
+          const url = window.location.href.replace(/[-/() ]/g, '').toUpperCase();
+          const title = document.title.replace(/[-/() ]/g, '').toUpperCase();
+          if (url.includes(cleanExpected) || title.includes(cleanExpected)) return true;
+          if (url.includes(cleanExpectedNoOTC) || title.includes(cleanExpectedNoOTC)) {
+            if (cleanExpected.includes('OTC') && !title.includes('OTC') && !document.body.innerText.includes('OTC')) return false;
+            return true;
+          }
+          return false;
+        };
+
+        if (!isCurrentTabOnPairTimeout(message.pair)) {
+           console.error(`[BinaryOps Content Script] 🚨 ABORTANDO CLIQUE FÍSICO! O sinal era para ${message.pair}, mas a aba atual não bate.`);
+           sendResponse({ status: "error", error: `Aba incorreta para clique físico (Timeout WS). Sinal era para: ${message.pair}` });
+           return;
+        }
+
         notifyPhysicalOrder();
         executeTradingOrder(message.direction, message.amount)
           .then(() => {
             console.log(`[BinaryOps Content Script] ✅ Ordem executada via fallback físico.`);
+            monitorOperationResult(message.direction, message.amount, message.pair, message.timeframe);
             sendResponse({ status: "success", msg: "Ordem executada via clique físico após timeout no WS" });
           })
           .catch((domErr) => {
@@ -796,16 +844,15 @@ function getBrokerBalance() {
   return null;
 }
 
-// Monitorar resultado da operação
-function monitorOperationResult(direction, amount, payout, pair, timeframe) {
+// Monitorar resultado da operação (Visual / Fallback)
+function monitorOperationResult(direction, amount, pair, timeframe) {
   console.log("[BinaryOps Content Script] Monitoramento de resultado iniciado...");
   
-  // Salvar saldo antes do encerramento
-  const balanceBefore = getBrokerBalance();
+  let balanceInitial = getBrokerBalance();
+  let tradeActiveBalance = null; // Saldo real logo após descontar a ordem
   
-  // Como a expiração varia, vamos monitorar por popups de vitória/derrota na tela ou mudanças de saldo
   let checkCount = 0;
-  const maxChecks = 60; // 2 minutos
+  const maxChecks = 90; // ~3 minutos (caso a expiração seja maior ou haja lag)
   
   const interval = setInterval(() => {
     checkCount++;
@@ -827,15 +874,37 @@ function monitorOperationResult(direction, amount, payout, pair, timeframe) {
     }
     
     // 2. Verificar alteração no saldo
-    const balanceNow = getBrokerBalance();
-    if (balanceBefore !== null && balanceNow !== null && balanceBefore !== balanceNow) {
-      clearInterval(interval);
-      if (balanceNow > balanceBefore) {
-        reportResult(direction, 'WIN', amount, payout, pair, timeframe);
-      } else {
-        reportResult(direction, 'LOSS', amount, payout, pair, timeframe);
-      }
-      return;
+    const currentBalance = getBrokerBalance();
+    
+    // Capturar o saldo logo após a ordem ser descontada (geralmente nos primeiros 10s)
+    if (checkCount < 5 && currentBalance !== null && balanceInitial !== null && currentBalance < balanceInitial) {
+       tradeActiveBalance = currentBalance;
+    }
+    
+    // Se o saldo atual for maior que o saldo inicial, foi lucro óbvio!
+    if (balanceInitial !== null && currentBalance !== null && currentBalance > balanceInitial) {
+       clearInterval(interval);
+       reportResult(direction, 'WIN', amount, 0.85, pair, timeframe);
+       return;
+    }
+
+    // Após 15 segundos, podemos confiar na checagem de finalização por saldo (se subir em relação ao tradeActiveBalance)
+    if (checkCount > 8 && tradeActiveBalance !== null && currentBalance !== null && currentBalance !== tradeActiveBalance) {
+       clearInterval(interval);
+       if (currentBalance > tradeActiveBalance) {
+         reportResult(direction, 'WIN', amount, 0.85, pair, timeframe);
+       } else {
+         reportResult(direction, 'LOSS', amount, 0, pair, timeframe);
+       }
+       return;
+    }
+    
+    // Se passar 70 segundos (1 minuto de M1 + margem de atraso) e não houver lucro/popup, assume LOSS.
+    if (checkCount === 35) {
+       console.log("[BinaryOps] 70s se passaram. Assumindo LOSS ou Empate pelo Fallback.");
+       clearInterval(interval);
+       reportResult(direction, 'LOSS', amount, 0, pair, timeframe);
+       return;
     }
     
     // Tempo máximo excedido
@@ -860,7 +929,7 @@ function findDOMElementByText(keywords) {
 }
 
 function reportResult(direction, result, amount, payout, targetPair, targetTimeframe) {
-  console.log(`[BinaryOps Content Script] Operação concluída: ${result} na direção ${direction}`);
+  console.log(`[BinaryOps Content Script] Operação concluída via Monitor Visual: ${result} na direção ${direction}`);
   
   // Detectar par e timeframe padrão
   let pair = targetPair;
