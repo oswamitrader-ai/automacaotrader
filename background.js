@@ -74,7 +74,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.storage.local.get({ pendingOps: [] }, (storageResult) => {
       const pendingForResponse = storageResult.pendingOps || [];
       
-      chrome.tabs.query({ url: ["*://*.exnova.com/*", "*://*.iqoption.com/*", "*://*.bullex.com/*"] }, (tabs) => {
+      chrome.tabs.query({ url: ["*://*.exnova.com/*", "*://*.iqoption.com/*", "*://*.bullex.com/*", "*://*.bull-ex.com/*"] }, (tabs) => {
         if (chrome.runtime.lastError || !tabs) {
           console.warn("[Background] Erro ao buscar abas:", chrome.runtime.lastError);
           sendResponse({ brokers: [], pendingOps: pendingForResponse });
@@ -89,7 +89,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           let brokerName = 'desconhecido';
           if (t.url.includes('exnova')) brokerName = 'exnova';
           else if (t.url.includes('iqoption')) brokerName = 'iqoption';
-          else if (t.url.includes('bullex')) brokerName = 'bullex';
+          else if (t.url.includes('bullex') || t.url.includes('bull-ex')) brokerName = 'bullex';
           
           activeBrokers.push({ tabId: t.id, broker: brokerName, title: t.title });
           
@@ -116,13 +116,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     // Consultar abas ativas das corretoras para restaurar brokerTabs caso o Service Worker tenha reiniciado
-    chrome.tabs.query({ url: ["*://*.exnova.com/*", "*://*.iqoption.com/*", "*://*.bullex.com/*"] }, (tabs) => {
+    chrome.tabs.query({ url: ["*://*.exnova.com/*", "*://*.iqoption.com/*", "*://*.bullex.com/*", "*://*.bull-ex.com/*"] }, (tabs) => {
       if (tabs) {
         tabs.forEach(t => {
           let brokerName = 'desconhecido';
           if (t.url.includes('exnova')) brokerName = 'exnova';
           else if (t.url.includes('iqoption')) brokerName = 'iqoption';
-          else if (t.url.includes('bullex')) brokerName = 'bullex';
+          else if (t.url.includes('bullex') || t.url.includes('bull-ex')) brokerName = 'bullex';
           
           if (!brokerTabs.has(t.id)) {
             brokerTabs.set(t.id, { broker: brokerName, url: t.url, title: t.title });
@@ -216,7 +216,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Receber resultado instantâneo da corretora capturado via WebSocket
   if (message.action === "option_closed_ws") {
     const raw = message.data;
-    const pair = raw.pair || getPairForActiveId(raw.activeId);
+    let rawPair = raw.pair || getPairForActiveId(raw.activeId);
+    if (!rawPair || typeof rawPair !== 'string') {
+      rawPair = 'EUR/USD-OTC'; // Fallback seguro caso o ativo seja desconhecido para evitar crashes por TypeError
+    }
+    const pair = rawPair;
     
     // Mapear Payout
     let payout = 85; 

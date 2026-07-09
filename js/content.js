@@ -130,7 +130,7 @@ window.addEventListener('message', (event) => {
 let broker = 'unknown';
 if (window.location.hostname.includes('exnova')) broker = 'exnova';
 else if (window.location.hostname.includes('iqoption')) broker = 'iqoption';
-else if (window.location.hostname.includes('bullex')) broker = 'bullex';
+else if (window.location.hostname.includes('bullex') || window.location.hostname.includes('bull-ex')) broker = 'bullex';
 
 // Configuração de seletores (podem ser estendidos/ajustados)
 const SELECTORS = {
@@ -254,6 +254,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (event.data.status === 'success') {
         console.log(`[BinaryOps Content Script] ✅ Ordem executada via WebSocket API!`);
         
+        // Iniciar monitoramento do resultado da operação em paralelo como fallback visual de segurança
+        monitorOperationResult(message.direction, message.amount, message.pair, message.timeframe, message.payout);
+        
         // Atualizar visualmente o campo de valor na tela apenas para dar feedback ao usuário
         try {
           const inputs = document.querySelectorAll('input:not([type="hidden"])');
@@ -307,7 +310,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         executeTradingOrder(message.direction, message.amount)
           .then(() => {
             console.log(`[BinaryOps Content Script] ✅ Ordem executada via fallback físico.`);
-            monitorOperationResult(message.direction, message.amount, message.pair, message.timeframe);
+            monitorOperationResult(message.direction, message.amount, message.pair, message.timeframe, message.payout);
             sendResponse({ status: "success", msg: `Ordem executada via clique físico após falha no WS (${event.data.error})` });
           })
           .catch((domErr) => {
@@ -335,7 +338,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (!wsResponded) {
         wsResponded = true;
         window.removeEventListener('message', wsResultHandler);
-        if (wsOrderAlreadySent) { sendResponse({ status: "success", msg: "Ordem ja enviada via WS (timeout)" }); return; }
+        if (wsOrderAlreadySent) { 
+          monitorOperationResult(message.direction, message.amount, message.pair, message.timeframe, message.payout);
+          sendResponse({ status: "success", msg: "Ordem ja enviada via WS (timeout)" }); 
+          return; 
+        }
         console.warn("[BinaryOps Content Script] Timeout WS. Tentando fallback físico...");
         
         // Validação de Segurança Extrema para o Timeout
@@ -363,7 +370,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         executeTradingOrder(message.direction, message.amount)
           .then(() => {
             console.log(`[BinaryOps Content Script] ✅ Ordem executada via fallback físico.`);
-            monitorOperationResult(message.direction, message.amount, message.pair, message.timeframe);
+            monitorOperationResult(message.direction, message.amount, message.pair, message.timeframe, message.payout);
             sendResponse({ status: "success", msg: "Ordem executada via clique físico após timeout no WS" });
           })
           .catch((domErr) => {
@@ -845,7 +852,7 @@ function getBrokerBalance() {
 }
 
 // Monitorar resultado da operação (Visual / Fallback)
-function monitorOperationResult(direction, amount, pair, timeframe) {
+function monitorOperationResult(direction, amount, pair, timeframe, payout = 85) {
   console.log("[BinaryOps Content Script] Monitoramento de resultado iniciado...");
   
   let balanceInitial = getBrokerBalance();
@@ -863,13 +870,13 @@ function monitorOperationResult(direction, amount, pair, timeframe) {
     
     if (winPopup) {
       clearInterval(interval);
-      reportResult(direction, 'WIN', amount, payout, pair, timeframe);
+      reportResult(direction, 'WIN', amount, payout || 85, pair, timeframe);
       return;
     }
     
     if (lossPopup) {
       clearInterval(interval);
-      reportResult(direction, 'LOSS', amount, payout, pair, timeframe);
+      reportResult(direction, 'LOSS', amount, 0, pair, timeframe);
       return;
     }
     
@@ -1291,6 +1298,9 @@ function createBrokerOverlay() {
 
   // --- Drag Logic ---
   let isDragging = false, dragOffsetX = 0, dragOffsetY = 0;
+  let maxDragX = 0, maxDragY = 0;
+  let targetX = 0, targetY = 0;
+  let animationFrameId = null;
   const header = document.getElementById('boOverlayHeader');
   
   header.addEventListener('mousedown', (e) => {
@@ -1300,20 +1310,37 @@ function createBrokerOverlay() {
     const rect = overlay.getBoundingClientRect();
     dragOffsetX = e.clientX - rect.left;
     dragOffsetY = e.clientY - rect.top;
+    
+    // Cache de limites no início do arrasto para evitar reflow síncrono no loop
+    maxDragX = window.innerWidth - overlay.offsetWidth;
+    maxDragY = window.innerHeight - overlay.offsetHeight;
+    
     overlay.style.transition = 'none';
     e.preventDefault();
   });
+  
   document.addEventListener('mousemove', (e) => {
     if (!isDragging) return;
-    const x = Math.max(0, Math.min(window.innerWidth - overlay.offsetWidth, e.clientX - dragOffsetX));
-    const y = Math.max(0, Math.min(window.innerHeight - overlay.offsetHeight, e.clientY - dragOffsetY));
-    overlay.style.left = x + 'px';
-    overlay.style.top = y + 'px';
-    overlay.style.right = 'auto';
+    targetX = Math.max(0, Math.min(maxDragX, e.clientX - dragOffsetX));
+    targetY = Math.max(0, Math.min(maxDragY, e.clientY - dragOffsetY));
+    
+    if (!animationFrameId) {
+      animationFrameId = requestAnimationFrame(() => {
+        overlay.style.left = targetX + 'px';
+        overlay.style.top = targetY + 'px';
+        overlay.style.right = 'auto';
+        animationFrameId = null;
+      });
+    }
   });
+  
   document.addEventListener('mouseup', () => {
     if (isDragging) {
       isDragging = false;
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
       overlay.style.transition = 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
     }
   });
@@ -1331,8 +1358,6 @@ function createBrokerOverlay() {
   overlay.querySelector('#boClose').addEventListener('click', (e) => {
     e.stopPropagation();
     overlay.style.display = 'none';
-    // Reabre após 30 segundos por segurança
-    setTimeout(() => { overlay.style.display = 'flex'; }, 30000);
   });
 }
 

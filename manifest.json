@@ -13,6 +13,7 @@
     "https://*.exnova.com/*",
     "https://*.iqoption.com/*",
     "https://*.bullex.com/*",
+    "https://*.bull-ex.com/*",
     "https://nfs.faireconomy.media/*",
     "https://api.binance.com/*",
     "https://api.twelvedata.com/*",
@@ -30,7 +31,8 @@
       "matches": [
         "https://*.exnova.com/*",
         "https://*.iqoption.com/*",
-        "https://*.bullex.com/*"
+        "https://*.bullex.com/*",
+        "https://*.bull-ex.com/*"
       ],
       "js": ["js/injected.js"],
       "run_at": "document_start",
@@ -41,7 +43,8 @@
       "matches": [
         "https://*.exnova.com/*",
         "https://*.iqoption.com/*",
-        "https://*.bullex.com/*"
+        "https://*.bullex.com/*",
+        "https://*.bull-ex.com/*"
       ],
       "js": ["js/content.js"],
       "run_at": "document_start",

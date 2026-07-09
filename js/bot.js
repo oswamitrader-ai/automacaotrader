@@ -882,10 +882,25 @@ const Bot = (() => {
   // ---- Gerenciamento de Resultados (Martingale e Soros) ----
 
   function handleTradingResult(opData) {
-    // Filtro de Duplicatas Bulletproof (Tempo + Par)
+    console.log("[Robô Dashboard] Recebido resultado de trading:", opData);
+    
+    // Filtro de Duplicatas Bulletproof Avançado (Janela de 20s por par e resultado)
+    state.processedOpsCache = state.processedOpsCache || {};
     const now = Date.now();
-    if (state.lastProcessedTime && (now - state.lastProcessedTime < 2000) && state.lastProcessedPair === opData.pair) {
-      return; // Ignora duplicata do mesmo par que chegou em menos de 2s
+    const opKey = `${opData.pair}_${opData.result}_${Math.floor(now / 20000)}`;
+    if (state.processedOpsCache[opKey]) {
+      console.log(`[Robô] Ignorando resultado duplicado para ${opData.pair} (${opData.result}) dentro da mesma janela.`);
+      return;
+    }
+    state.processedOpsCache[opKey] = true;
+
+    // Limpar cache antigo para não vazar memória
+    for (let key in state.processedOpsCache) {
+      const parts = key.split('_');
+      const timeBucket = parseInt(parts[parts.length - 1]);
+      if (Math.floor(now / 20000) - timeBucket > 2) {
+        delete state.processedOpsCache[key];
+      }
     }
     state.lastProcessedTime = now;
     state.lastProcessedPair = opData.pair;
